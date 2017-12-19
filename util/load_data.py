@@ -10,7 +10,7 @@ from os import path
 
 
 def load_segment_borders(data_path: str) -> pd.DataFrame:
-    with pd.HDFStore(path.join(data_path, 'mldb_seg5p_segment_borders_corrected.hdf')) as store:
+    with pd.HDFStore(path.join(data_path, 'mldb_seg5p_segment_borders_corrected1.hdf')) as store:
         borders = store['mldb_seg5p']
     return borders
 

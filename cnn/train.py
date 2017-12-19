@@ -136,29 +136,31 @@ def main(args):
         timestamp = time()
         global_step_v = 0
         avg_loss = 0.0
+
+        # Quick fix until I figure out how to process different sized buckets
+        train_buckets = [train_buckets[largest_bucket[0]]]
         for epoch in range(args.max_epoch):
-            bucket_id = largest_bucket[0]
-            # for bucket_id in train_buckets:
-            for batch_X, batch_Y in feed(train_buckets[bucket_id], args.batch_size):
-                # Single training step
-                summary_v, global_step_v, loss_v, _ = sess.run(
-                    fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
-                    feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.6})
-                summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
-                avg_loss += loss_v
+            for bucket_id in train_buckets:
+                for batch_X, batch_Y in feed(train_buckets[bucket_id], args.batch_size):
+                    # Single training step
+                    summary_v, global_step_v, loss_v, _ = sess.run(
+                        fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
+                        feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.6})
+                    summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
+                    avg_loss += loss_v
 
-                # Reporting
-                if global_step_v % args.report_period == 0:
-                    print("iter %d, epoch %.0f, avg. loss %.2f, time per iter %.2fs" % (
-                        global_step_v, epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
-                    ))
-                    timestamp = time()
-                    avg_loss = 0.0
+                    # Reporting
+                    if global_step_v % args.report_period == 0:
+                        print("iter %d, epoch %.0f, avg. loss %.2f, time per iter %.2fs" % (
+                            global_step_v, epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
+                        ))
+                        timestamp = time()
+                        avg_loss = 0.0
 
-                # Checkpointing
-                if global_step_v % 1000 == 0:
-                    real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
-                    print("Saved the checkpoint to: %s" % real_save_path)
+                    # Checkpointing
+                    if global_step_v % 1000 == 0:
+                        real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
+                        print("Saved the checkpoint to: %s" % real_save_path)
 
         real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
         print("Saved the checkpoint to: %s" % real_save_path)
