@@ -1,14 +1,14 @@
 from cnn.mnist_like import MnistLike
 from extract_features import tensor_from_ssm, labels_from_label_array
 from util.load_data import load_ssm_string, load_segment_borders
-from time import time
-from sklearn.utils import shuffle
-from os import path
 
 import argparse
 import math
 import numpy as np
 import tensorflow as tf
+from time import time
+from sklearn.utils import shuffle
+from os import path
 from tensorflow.contrib import slim
 
 
@@ -66,7 +66,7 @@ def main(args):
 
         # Reporting
         if counter % 10000 == 0:
-            print("  processed %3.0fk items (%4.1fs, filt.: %5.1fk)" % (k(counter), tdiff(timestamp), k(filtered)))
+            print("  processed %3.0fk items (%4.1fs, filt.: %4.1fk)" % (k(counter), tdiff(timestamp), k(filtered)))
             timestamp = time()
 
         # Filter out too small or too large ssm
@@ -97,6 +97,11 @@ def main(args):
         print("  max: %3d len: %d" % (2**bucket_id, bucket_len))
         if bucket_len > largest_bucket[1]:
             largest_bucket = (bucket_id, bucket_len)
+
+    # Quick fix until I figure out how to process different sized buckets
+    largest_bucket_content = train_buckets[largest_bucket[0]]
+    train_buckets = dict()
+    train_buckets[largest_bucket[0]] = largest_bucket_content
 
     # Define the neural network
     nn = MnistLike(window_size=args.window_size, ssm_size=2**largest_bucket[0])
@@ -131,14 +136,12 @@ def main(args):
             saver.restore(sess=sess, save_path=latest_checkpoint)
             print("Done in %.2fs" % tdiff(timestamp))
 
-        # Training loop
         print()
         timestamp = time()
         global_step_v = 0
         avg_loss = 0.0
 
-        # Quick fix until I figure out how to process different sized buckets
-        train_buckets = [train_buckets[largest_bucket[0]]]
+        # Training loop
         for epoch in range(args.max_epoch):
             for bucket_id in train_buckets:
                 for batch_X, batch_Y in feed(train_buckets[bucket_id], args.batch_size):
@@ -151,7 +154,7 @@ def main(args):
 
                     # Reporting
                     if global_step_v % args.report_period == 0:
-                        print("iter %d, epoch %.0f, avg. loss %.2f, time per iter %.2fs" % (
+                        print("iter %d, epoch %.0f, avg.loss %.2f, time per iter %.2fs" % (
                             global_step_v, epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
                         ))
                         timestamp = time()

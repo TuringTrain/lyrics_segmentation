@@ -21,8 +21,8 @@ class MnistLike(NN):
         #   batch_size
         # Note that we do not fix the first dimension to allow flexible batch_size for evaluation / leftover samples
         with tf.name_scope('input'):
-            self.g_in = tf.placeholder(tf.float32, shape=[None, 2*window_size, ssm_size])
-            self.g_labels = tf.placeholder(tf.int32, shape=[None])
+            self.g_in = tf.placeholder(tf.float32, shape=[None, 2*window_size, ssm_size], name="input")
+            self.g_labels = tf.placeholder(tf.int32, shape=[None], name="labels")
 
         # Reshape to use within a convolutional neural net.
         #   contrary to mnist example, it just adds the last dimension whichs is the amount of channels in the image,
@@ -32,32 +32,23 @@ class MnistLike(NN):
 
         # First convolutional layer - maps input to 32 feature maps.
         with tf.name_scope('conv1'):
-            W_conv1 = self.weight_variable([2*window_size, 2*window_size, 1, 32])
+            W_conv1 = self.weight_variable([window_size+1, window_size+1, 1, 32])
             b_conv1 = self.bias_variable([32])
-            h_conv1 = tf.nn.relu(self.conv2d(x_image, W_conv1) + b_conv1)
+            h_conv1 = tf.nn.conv2d(x_image, W_conv1, strides=[1, 1, 1, 1], padding='VALID')
+            h_conv1 = tf.nn.relu(h_conv1 + b_conv1)
 
-        # Pooling layer - downsamples by 2X.
+        # Pooling layer - downsamples by window_size.
         with tf.name_scope('pool1'):
-            h_pool1 = self.max_pool_2x2(h_conv1)
-
-        # Second convolutional layer -- maps 32 feature maps to 64.
-        with tf.name_scope('conv2'):
-            W_conv2 = self.weight_variable([window_size, window_size, 32, 64])
-            b_conv2 = self.bias_variable([64])
-            h_conv2 = tf.nn.relu(self.conv2d(h_pool1, W_conv2) + b_conv2)
-
-        # Second pooling layer.
-        with tf.name_scope('pool2'):
-            h_pool2 = self.max_pool_2x2(h_conv2)
+            h_pool1 = tf.nn.max_pool(h_conv1, ksize=[1, window_size, window_size, 1], strides=[1, window_size, window_size, 1], padding='VALID')
 
         # We have to either fix the ssm_size or do an average here
         fc1_size = 512
-        fc1_input_size = int((ssm_size / 4) * (window_size / 2)) * 64
+        fc1_input_size = (int(ssm_size / window_size) - 1) * 32
         with tf.name_scope('fc1'):
             W_fc1 = self.weight_variable([fc1_input_size, fc1_size])
             b_fc1 = self.bias_variable([fc1_size])
 
-            h_pool2_flat = tf.reshape(h_pool2, [-1, fc1_input_size])
+            h_pool2_flat = tf.reshape(h_pool1, [-1, fc1_input_size])
             h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
 
         # Dropout - controls the complexity of the model, prevents co-adaptation of features
@@ -80,10 +71,10 @@ class MnistLike(NN):
     @staticmethod
     def conv2d(x, W):
         """conv2d returns a 2d convolution layer with full stride."""
-        return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+        return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='VALID')
 
     @staticmethod
     def max_pool_2x2(x):
         """max_pool_2x2 downsamples a feature map by 2X."""
         return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
-                              strides=[1, 2, 2, 1], padding='SAME')
+                              strides=[1, 2, 2, 1], padding='VALID')
