@@ -1,4 +1,4 @@
-from cnn.mnist_like import MnistLike
+from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_ssm, labels_from_label_array
 from util.load_data import load_ssm_string, load_segment_borders
 
@@ -6,6 +6,7 @@ import argparse
 import math
 import numpy as np
 import tensorflow as tf
+from random import random
 from time import time
 from sklearn.utils import shuffle
 from os import path
@@ -19,6 +20,31 @@ def tdiff(timestamp: float) -> float:
 def k(value: int) -> float:
     return float(value) / 1000
 
+
+def add_to_buckets(buckets, bucket_id, tensor, labels):
+    if bucket_id not in buckets:
+        buckets[bucket_id] = ([], [])
+    X, Y = buckets[bucket_id]
+    X.append(tensor)
+    Y.append(labels)
+
+
+def compact_buckets(buckets):
+    # Compacting buckets and printing statistics
+    largest_bucket = (0, 0)
+    for bucket_id in buckets:
+        X, Y = buckets[bucket_id]
+        buckets[bucket_id] = (np.vstack(X), np.concatenate(Y))
+        bucket_len = buckets[bucket_id][1].shape[0]
+        print("  max: %3d len: %d" % (2 ** bucket_id, bucket_len))
+        if bucket_len > largest_bucket[1]:
+            largest_bucket = (bucket_id, bucket_len)
+
+    # Quick fix until I figure out how to process different sized buckets
+    largest_bucket_content = buckets[largest_bucket[0]]
+    buckets = dict()
+    buckets[largest_bucket[0]] = largest_bucket_content
+    return buckets
 
 def feed(training_data, batch_size):
     X, Y = training_data
@@ -55,6 +81,7 @@ def main(args):
 
     # Producing training set
     train_buckets = dict()
+    test_buckets = dict()
     print("Producing training set...")
     counter = 0
     filtered = 0
@@ -79,32 +106,22 @@ def main(args):
         ssm_tensor = tensor_from_ssm(ssm, 2**bucket_id, args.window_size)
         ssm_labels = labels_from_label_array(borders_obj.borders, ssm_size)
 
-        if bucket_id not in train_buckets:
-            train_buckets[bucket_id] = ([], [])
-        X, Y = train_buckets[bucket_id]
-        X.append(ssm_tensor)
-        Y.append(ssm_labels)
+        # 10% goes to test set
+        if random() > 0.9:
+            add_to_buckets(test_buckets, bucket_id, ssm_tensor, ssm_labels)
+        else:
+            add_to_buckets(train_buckets, bucket_id, ssm_tensor, ssm_labels)
     del ssm_string_data
     del segment_borders
 
     # Compacting buckets and printing statistics
-    print("Dataset buckets:")
-    largest_bucket = (0, 0)
-    for bucket_id in train_buckets:
-        X, Y = train_buckets[bucket_id]
-        train_buckets[bucket_id] = (np.vstack(X), np.concatenate(Y))
-        bucket_len = train_buckets[bucket_id][1].shape[0]
-        print("  max: %3d len: %d" % (2**bucket_id, bucket_len))
-        if bucket_len > largest_bucket[1]:
-            largest_bucket = (bucket_id, bucket_len)
-
-    # Quick fix until I figure out how to process different sized buckets
-    largest_bucket_content = train_buckets[largest_bucket[0]]
-    train_buckets = dict()
-    train_buckets[largest_bucket[0]] = largest_bucket_content
+    print("Training set buckets:")
+    train_buckets = compact_buckets(train_buckets)
+    print("Test set buckets:")
+    test_buckets = compact_buckets(test_buckets)
 
     # Define the neural network
-    nn = MnistLike(window_size=args.window_size, ssm_size=2**largest_bucket[0])
+    nn = NoPadding1Conv(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
 
     # Defining optimisation problem
     g_global_step = tf.train.get_or_create_global_step()
@@ -121,9 +138,8 @@ def main(args):
 
     with tf.Session() as sess:
         # Checkpoint restore / variable initialising
-        checkpoint_path = path.join(args.output, 'checkpoint')
-        save_path = path.join(checkpoint_path, 'model.ckpt')
-        latest_checkpoint = tf.train.latest_checkpoint(checkpoint_path)
+        save_path = path.join(args.output, 'model.ckpt')
+        latest_checkpoint = tf.train.latest_checkpoint(args.output)
         if latest_checkpoint is None:
             print("Initializing variables")
             timestamp = time()
@@ -148,17 +164,27 @@ def main(args):
                     # Single training step
                     summary_v, global_step_v, loss_v, _ = sess.run(
                         fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
-                        feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.6})
+                        feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.8})
                     summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
                     avg_loss += loss_v
 
                     # Reporting
                     if global_step_v % args.report_period == 0:
-                        print("iter %d, epoch %.0f, avg.loss %.2f, time per iter %.2fs" % (
-                            global_step_v, epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
+                        print("Iter %d" % global_step_v)
+                        print("  epoch %.0f, avg.loss %.2f, time per iter %.2fs" % (
+                            epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
                         ))
                         timestamp = time()
                         avg_loss = 0.0
+
+                        # Evaluation
+                        micro_tp = 0
+                        total = 0
+                        for bucket_id in train_buckets:
+                            for test_X, test_Y in feed(test_buckets[bucket_id], args.batch_size):
+                                total += test_X.shape[0]
+                                micro_tp += test_X.shape[0] - nn.g_incorrect.eval(feed_dict={nn.g_in: test_X, nn.g_labels: test_Y, nn.g_dprob: 1.0})
+                        print("  precision: %.2f%%" % ((micro_tp / total) * 100))
 
                     # Checkpointing
                     if global_step_v % 1000 == 0:

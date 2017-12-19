@@ -3,11 +3,12 @@ import tensorflow as tf
 from cnn.nn import NN
 
 
-class MnistLike(NN):
+class NoPadding1Conv(NN):
     def __init__(self, window_size, ssm_size):
         super().__init__()
 
         self.g_dprob = None
+        self.g_incorrect = None
 
         self.window_size = window_size
         self.ssm_size = ssm_size
@@ -68,13 +69,7 @@ class MnistLike(NN):
             losses = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.g_labels, logits=self.g_out)
             self.g_loss = tf.reduce_mean(losses)
 
-    @staticmethod
-    def conv2d(x, W):
-        """conv2d returns a 2d convolution layer with full stride."""
-        return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='VALID')
-
-    @staticmethod
-    def max_pool_2x2(x):
-        """max_pool_2x2 downsamples a feature map by 2X."""
-        return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
-                              strides=[1, 2, 2, 1], padding='VALID')
+        # Evaluation
+        with tf.name_scope('evaluation'):
+            results = tf.argmax(self.g_out, axis=1, output_type=tf.int32)
+            self.g_incorrect = tf.reduce_sum(tf.bitwise.bitwise_xor(results, self.g_labels))
