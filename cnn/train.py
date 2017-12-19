@@ -116,28 +116,36 @@ def main(args):
 
     with tf.Session() as sess:
         # Checkpoint restore / variable initialising
-        latest_checkpoint = tf.train.latest_checkpoint(path.join(args.output, 'checkpoint'))
+        checkpoint_path = path.join(args.output, 'checkpoint')
+        latest_checkpoint = tf.train.latest_checkpoint(checkpoint_path)
         if latest_checkpoint is None:
-            print('Initializing variables')
+            print("Initializing variables")
             timestamp = time()
             tf.get_variable_scope().set_initializer(tf.random_normal_initializer(mean=0.0, stddev=0.01))
             tf.global_variables_initializer().run()
-            print('Done in %.2fs' % tdiff(timestamp))
+            print("Done in %.2fs" % tdiff(timestamp))
         else:
-            print('Restoring from checkpoint variables')
+            print("Restoring from checkpoint variables")
             timestamp = time()
             saver.restore(sess=sess, save_path=latest_checkpoint)
-            print('Done in %.2fs' % tdiff(timestamp))
+            print("Done in %.2fs" % tdiff(timestamp))
 
         # Training loop
         for epoch in range(args.max_epoch):
             bucket_id = largest_bucket[0]
             # for bucket_id in train_buckets:
             for batch_X, batch_Y in feed(train_buckets[bucket_id], args.batch_size):
+                # Single training step
                 summary_v, global_step_v, _ = sess.run(
                     fetches=[g_summary, g_global_step, g_train_op],
                     feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.6})
                 summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
+
+                # Checkpointing
+                if global_step_v % 1000 == 0:
+                    save_path = path.join(checkpoint_path, 'model.ckpt')
+                    real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
+                    print("Saved the checkpoint to: %s" % real_save_path)
 
 
 if __name__ == '__main__':
