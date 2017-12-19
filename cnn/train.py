@@ -117,6 +117,7 @@ def main(args):
     with tf.Session() as sess:
         # Checkpoint restore / variable initialising
         checkpoint_path = path.join(args.output, 'checkpoint')
+        save_path = path.join(checkpoint_path, 'model.ckpt')
         latest_checkpoint = tf.train.latest_checkpoint(checkpoint_path)
         if latest_checkpoint is None:
             print("Initializing variables")
@@ -131,21 +132,36 @@ def main(args):
             print("Done in %.2fs" % tdiff(timestamp))
 
         # Training loop
+        print()
+        timestamp = time()
+        global_step_v = 0
+        avg_loss = 0.0
         for epoch in range(args.max_epoch):
             bucket_id = largest_bucket[0]
             # for bucket_id in train_buckets:
             for batch_X, batch_Y in feed(train_buckets[bucket_id], args.batch_size):
                 # Single training step
-                summary_v, global_step_v, _ = sess.run(
-                    fetches=[g_summary, g_global_step, g_train_op],
+                summary_v, global_step_v, loss_v, _ = sess.run(
+                    fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
                     feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.6})
                 summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
+                avg_loss += loss_v
+
+                # Reporting
+                if global_step_v % args.report_period == 0:
+                    print("iter %d, epoch %.0f, avg. loss %.2f, time per iter %.2fs" % (
+                        global_step_v, epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
+                    ))
+                    timestamp = time()
+                    avg_loss = 0.0
 
                 # Checkpointing
                 if global_step_v % 1000 == 0:
-                    save_path = path.join(checkpoint_path, 'model.ckpt')
                     real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
                     print("Saved the checkpoint to: %s" % real_save_path)
+
+        real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
+        print("Saved the checkpoint to: %s" % real_save_path)
 
 
 if __name__ == '__main__':
@@ -164,6 +180,8 @@ if __name__ == '__main__':
                         help='Minimum size of the ssm matrix')
     parser.add_argument('--max-ssm-size', type=int, default=128,
                         help='Maximum size of the ssm matrix')
+    parser.add_argument('--report-period', type=int, default=1000,
+                        help='When to report stats')
 
     args = parser.parse_args()
     main(args)

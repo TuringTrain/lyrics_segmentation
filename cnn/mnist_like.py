@@ -1,13 +1,13 @@
 import tensorflow as tf
 
+from cnn.nn import NN
 
-class MnistLike(object):
+
+class MnistLike(NN):
     def __init__(self, window_size, ssm_size):
-        self.g_in = None
-        self.g_labels = None
+        super().__init__()
+
         self.g_dprob = None
-        self.g_out = None
-        self.g_loss = None
 
         self.window_size = window_size
         self.ssm_size = ssm_size
@@ -87,15 +87,3 @@ class MnistLike(object):
         """max_pool_2x2 downsamples a feature map by 2X."""
         return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
                               strides=[1, 2, 2, 1], padding='SAME')
-
-    @staticmethod
-    def weight_variable(shape):
-        """weight_variable generates a weight variable of a given shape."""
-        initial = tf.truncated_normal(shape, stddev=0.1)
-        return tf.Variable(initial)
-
-    @staticmethod
-    def bias_variable(shape):
-        """bias_variable generates a bias variable of a given shape."""
-        initial = tf.constant(0.1, shape=shape)
-        return tf.Variable(initial)
