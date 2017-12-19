@@ -1,5 +1,6 @@
 from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_ssm, labels_from_label_array
+from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets
 from util.load_data import load_ssm_string, load_segment_borders
 
 import argparse
@@ -8,18 +9,9 @@ import numpy as np
 import tensorflow as tf
 from random import random
 from time import time
-from sklearn.utils import shuffle
 from sklearn.metrics import confusion_matrix
 from os import path
 from tensorflow.contrib import slim
-
-
-def tdiff(timestamp: float) -> float:
-    return time() - timestamp
-
-
-def k(value: int) -> float:
-    return float(value) / 1000
 
 
 def add_to_buckets(buckets: dict(), bucket_id: int, tensor: np.ndarray, labels: np.ndarray) -> None:
@@ -28,36 +20,6 @@ def add_to_buckets(buckets: dict(), bucket_id: int, tensor: np.ndarray, labels: 
     X, Y = buckets[bucket_id]
     X.append(tensor)
     Y.append(labels)
-
-
-def compact_buckets(buckets: dict()) -> dict():
-    # Compacting buckets and printing statistics
-    largest_bucket = (0, 0)
-    for bucket_id in buckets:
-        X, Y = buckets[bucket_id]
-        buckets[bucket_id] = (np.vstack(X), np.concatenate(Y))
-        bucket_len = buckets[bucket_id][1].shape[0]
-        print("  max: %3d len: %d" % (2 ** bucket_id, bucket_len))
-        if bucket_len > largest_bucket[1]:
-            largest_bucket = (bucket_id, bucket_len)
-
-    # Quick fix until I figure out how to process different sized buckets
-    largest_bucket_content = buckets[largest_bucket[0]]
-    buckets = dict()
-    buckets[largest_bucket[0]] = largest_bucket_content
-    return buckets
-
-
-def feed(training_data: (np.ndarray, np.ndarray), batch_size: int) -> (np.ndarray, np.ndarray):
-    X, Y = training_data
-    X, Y = shuffle(X, Y)
-    size = Y.shape[0]
-
-    pointer = 0
-    while pointer+batch_size < size:
-        yield X[pointer:pointer+batch_size], Y[pointer:pointer+batch_size]
-        pointer += batch_size
-    yield X[pointer:], Y[pointer:]
 
 
 def main(args):
@@ -183,18 +145,15 @@ def main(args):
                         tp = 0
                         fp = 0
                         fn = 0
-                        for bucket_id in train_buckets:
+                        for bucket_id in test_buckets:
                             for test_X, true_Y in feed(test_buckets[bucket_id], args.batch_size):
                                 pred_Y = nn.g_results.eval(feed_dict={nn.g_in: test_X, nn.g_dprob: 1.0})
                                 _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_Y, pred_Y).ravel()
                                 tp += cur_tp
                                 fp += cur_fp
                                 fn += cur_fn
-                        prec = tp / (tp + fp)
-                        recall = tp / (tp + fn)
-                        f1 = 2 * prec * recall / (prec + recall)
                         print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%" % (
-                            prec * 100, recall * 100, f1 * 100
+                            precision(tp, fp) * 100, recall(tp, fn) * 100, f1(tp, fp, fn) * 100
                         ))
 
                     # Checkpointing
@@ -212,7 +171,7 @@ if __name__ == '__main__':
                         help='The directory with the data')
     parser.add_argument('--output', required=True,
                         help='Output path')
-    parser.add_argument('--batch-size', type=int, default=128,
+    parser.add_argument('--batch-size', type=int, default=256,
                         help='The size of a mini-batch')
     parser.add_argument('--max-epoch', type=int, default=5,
                         help='The maximum epoch number')
