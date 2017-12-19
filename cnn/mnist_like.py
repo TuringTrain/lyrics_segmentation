@@ -7,6 +7,7 @@ class MnistLike(object):
         self.g_labels = None
         self.g_dprob = None
         self.g_out = None
+        self.g_loss = None
 
         self.window_size = window_size
         self.ssm_size = ssm_size
@@ -21,7 +22,7 @@ class MnistLike(object):
         # Note that we do not fix the first dimension to allow flexible batch_size for evaluation / leftover samples
         with tf.name_scope('input'):
             self.g_in = tf.placeholder(tf.float32, shape=[None, 2*window_size, ssm_size])
-            self.g_labels = tf.placeholder(tf.float32, shape=[None])
+            self.g_labels = tf.placeholder(tf.int32, shape=[None])
 
         # Reshape to use within a convolutional neural net.
         #   contrary to mnist example, it just adds the last dimension whichs is the amount of channels in the image,
@@ -51,7 +52,7 @@ class MnistLike(object):
 
         # We have to either fix the ssm_size or do an average here
         fc1_size = 512
-        fc1_input_size = (ssm_size / 4) * 64
+        fc1_input_size = int(ssm_size / 4) * 64
         with tf.name_scope('fc1'):
             W_fc1 = self.weight_variable([fc1_input_size, fc1_size])
             b_fc1 = self.bias_variable([fc1_size])
@@ -70,6 +71,11 @@ class MnistLike(object):
             b_fc2 = self.bias_variable([2])
 
             self.g_out = tf.matmul(h_fc1_drop, W_fc2) + b_fc2
+
+        # Loss
+        with tf.name_scope('loss'):
+            losses = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.g_labels, logits=self.g_out)
+            self.g_loss = tf.reduce_mean(losses)
 
     @staticmethod
     def conv2d(x, W):
