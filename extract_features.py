@@ -1,29 +1,56 @@
 import numpy as np
+import math
+import json
 
-#get line-wise windows from a picture by horizontally slicing it
-#the feature of a line is the partial picture that is centered around the line index
-#e.g. if half window size is 2, the window is 5 including its center
-#feature of line 4 would be the picture with lines [line 2, line 3, line 4, line 5, line 6]
-#picture is a numpy.ndarray
 
-#3D tensor containing all line-wise features (=sub pictures)
-def tensor_from_picture(picture, half_window=2):
-    dim_x = picture.shape[0]
+def labels_from_label_array(label_array, ssm_size):
+    if isinstance(label_array, str):
+        label_array = json.loads(label_array)
+
+    labels = np.zeros(ssm_size, dtype=np.float32)
+    for label in label_array:
+        if label >= labels.shape[0]:
+            continue
+        labels[label] = 1.0
+    return labels
+
+
+def tensor_from_ssm(ssm: np.ndarray, pad_to_size: int, half_window=2) -> np.ndarray:
+    """
+    Produce a tensor containing all line-wise features for the given similarity matrix
+
+        the feature of a line is the partial picture that is centered around the line index
+        e.g. if half window size is 2, the window is 5 including its center
+        feature of line 4 would be the picture with lines [line 2, line 3, line 4, line 5, line 6]
+
+    :param ssm: square similarity matrix
+    :param pad_to_size: pad feature matrices to a certain size (maximum size of the image in the dataset)
+    :param half_window: the size of the window
+    :return: n feature matrices of size pad_to_size x 2*half_window+1, where n equals to ssm size
+    """
+    assert ssm.shape[0] == ssm.shape[1] # SSM has to be square
+    ssm_size = ssm.shape[0]
+
+    # dimensions of the final tensor
+    dim_x = ssm_size
     dim_y = 2 * half_window + 1
-    dim_z= picture.shape[1]
+    dim_z = pad_to_size
     tensor = np.empty([dim_x, dim_y, dim_z], dtype=np.float32)
-    for line_index in range(picture.shape[0]):
-        subpic = subpicture_from(picture, line_index, half_window)
-        tensor[line_index] = subpic
-    return tensor
+    for line in range(ssm_size):
+        # lower and upper bounds of the window
+        lower = line - half_window
+        upper = line + half_window + 1
 
-def subpicture_from(picture, line_index, half_window):
-    subpicture = np.empty([0, picture.shape[1]], dtype=np.float32)
-    for index in range(line_index - half_window, line_index + half_window + 1):
-        if index < 0 or index >= picture.shape[0]:
-            #padding with zeros
-            current_line = np.zeros(picture.shape[1]).reshape(1,-1)
-        else:
-            current_line = picture[index, :].reshape(1,-1)
-        subpicture = np.append(subpicture, current_line, axis=0)
-    return subpicture
+        unpadded_patch = np.concatenate((
+            np.zeros([max(-lower, 0), ssm_size], dtype=np.float32),  # Padding from top
+            ssm[max(lower, 0):min(upper, ssm_size), :],
+            np.zeros([max(upper - ssm_size, 0), ssm_size])  # Padding from bottom
+        ), axis=0)  # Row-wise
+
+        pad_size = float(pad_to_size - ssm_size) / 2
+        tensor[line] = np.concatenate((
+            np.zeros([dim_y, int(math.floor(pad_size))]),  # Padding from left
+            unpadded_patch,
+            np.zeros([dim_y, int(math.ceil(pad_size))])  # Padding from right
+        ), axis=1)  # Column-wise
+    return tensor
