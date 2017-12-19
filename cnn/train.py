@@ -9,6 +9,7 @@ import tensorflow as tf
 from random import random
 from time import time
 from sklearn.utils import shuffle
+from sklearn.metrics import confusion_matrix
 from os import path
 from tensorflow.contrib import slim
 
@@ -21,7 +22,7 @@ def k(value: int) -> float:
     return float(value) / 1000
 
 
-def add_to_buckets(buckets, bucket_id, tensor, labels):
+def add_to_buckets(buckets: dict(), bucket_id: int, tensor: np.ndarray, labels: np.ndarray) -> None:
     if bucket_id not in buckets:
         buckets[bucket_id] = ([], [])
     X, Y = buckets[bucket_id]
@@ -29,7 +30,7 @@ def add_to_buckets(buckets, bucket_id, tensor, labels):
     Y.append(labels)
 
 
-def compact_buckets(buckets):
+def compact_buckets(buckets: dict()) -> dict():
     # Compacting buckets and printing statistics
     largest_bucket = (0, 0)
     for bucket_id in buckets:
@@ -46,13 +47,13 @@ def compact_buckets(buckets):
     buckets[largest_bucket[0]] = largest_bucket_content
     return buckets
 
-def feed(training_data, batch_size):
+
+def feed(training_data: (np.ndarray, np.ndarray), batch_size: int) -> (np.ndarray, np.ndarray):
     X, Y = training_data
     X, Y = shuffle(X, Y)
     size = Y.shape[0]
 
     pointer = 0
-
     while pointer+batch_size < size:
         yield X[pointer:pointer+batch_size], Y[pointer:pointer+batch_size]
         pointer += batch_size
@@ -177,14 +178,24 @@ def main(args):
                         timestamp = time()
                         avg_loss = 0.0
 
-                        # Evaluation
-                        micro_tp = 0
-                        total = 0
+                    # Evaluation
+                    if global_step_v % (args.report_period*2) == 0:
+                        tp = 0
+                        fp = 0
+                        fn = 0
                         for bucket_id in train_buckets:
-                            for test_X, test_Y in feed(test_buckets[bucket_id], args.batch_size):
-                                total += test_X.shape[0]
-                                micro_tp += test_X.shape[0] - nn.g_incorrect.eval(feed_dict={nn.g_in: test_X, nn.g_labels: test_Y, nn.g_dprob: 1.0})
-                        print("  precision: %.2f%%" % ((micro_tp / total) * 100))
+                            for test_X, true_Y in feed(test_buckets[bucket_id], args.batch_size):
+                                pred_Y = nn.g_results.eval(feed_dict={nn.g_in: test_X, nn.g_dprob: 1.0})
+                                _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_Y, pred_Y).ravel()
+                                tp += cur_tp
+                                fp += cur_fp
+                                fn += cur_fn
+                        prec = tp / (tp + fp)
+                        recall = tp / (tp + fn)
+                        f1 = 2 * prec * recall / (prec + recall)
+                        print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%" % (
+                            prec * 100, recall * 100, f1 * 100
+                        ))
 
                     # Checkpointing
                     if global_step_v % 1000 == 0:

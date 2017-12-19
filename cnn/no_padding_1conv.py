@@ -8,7 +8,7 @@ class NoPadding1Conv(NN):
         super().__init__()
 
         self.g_dprob = None
-        self.g_incorrect = None
+        self.g_results = None
 
         self.window_size = window_size
         self.ssm_size = ssm_size
@@ -71,5 +71,4 @@ class NoPadding1Conv(NN):
 
         # Evaluation
         with tf.name_scope('evaluation'):
-            results = tf.argmax(self.g_out, axis=1, output_type=tf.int32)
-            self.g_incorrect = tf.reduce_sum(tf.bitwise.bitwise_xor(results, self.g_labels))
+            self.g_results = tf.argmax(self.g_out, axis=1, output_type=tf.int32)
