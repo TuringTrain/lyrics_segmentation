@@ -1,3 +1,4 @@
+from cnn.mnist_like import MnistLike
 from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_ssm, labels_from_label_array
 from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets
@@ -84,7 +85,7 @@ def main(args):
     test_buckets = compact_buckets(test_buckets)
 
     # Define the neural network
-    nn = NoPadding1Conv(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
+    nn = MnistLike(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
 
     # Defining optimisation problem
     g_global_step = tf.train.get_or_create_global_step()
