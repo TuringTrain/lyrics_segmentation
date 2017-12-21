@@ -10,8 +10,8 @@ def labels_from_label_array(label_array, ssm_size):
     labels = np.zeros(ssm_size, dtype=np.int32)
     for label in label_array:
         # Workaround for buggy labels, probably not needed anymore
-        if label >= labels.shape[0]:
-            continue
+        # if label >= labels.shape[0]:
+        #    continue
         labels[label] = 1
     return labels
 
