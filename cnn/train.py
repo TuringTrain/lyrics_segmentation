@@ -51,6 +51,7 @@ def main(args):
     counter = 0
     filtered = 0
     timestamp = time()
+    max_ssm_size = min(max_ssm_size, args.max_ssm_size)
     for borders_obj in segment_borders.itertuples():
         counter += 1
         ssm = ssm_string_data.loc[borders_obj.id].ssm
@@ -67,7 +68,10 @@ def main(args):
             continue
 
         # Sentences are grouped into buckets to improve performance
-        bucket_id = int(math.ceil(math.log2(ssm_size)))
+        bucket_size = ssm_size
+        if not args.buckets:
+            bucket_size = max_ssm_size
+        bucket_id = int(math.ceil(math.log2(bucket_size)))
         ssm_tensor = tensor_from_ssm(ssm, 2**bucket_id, args.window_size)
         ssm_labels = labels_from_label_array(borders_obj.borders, ssm_size)
 
@@ -192,6 +196,8 @@ if __name__ == '__main__':
                         help='Maximum size of the ssm matrix')
     parser.add_argument('--report-period', type=int, default=1000,
                         help='When to report stats')
+    parser.add_argument('--buckets', default=False, action='store_true',
+                        help='Enable buckets')
 
     args = parser.parse_args()
     main(args)
