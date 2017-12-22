@@ -1,3 +1,4 @@
+from cnn.dense import Dense
 from cnn.mnist_like import MnistLike
 from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_ssm, labels_from_label_array
@@ -85,7 +86,9 @@ def main(args):
     test_buckets = compact_buckets(test_buckets)
 
     # Define the neural network
-    nn = MnistLike(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
+    nn = Dense(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
+    # nn = NoPadding1Conv(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
+    # nn = MnistLike(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
 
     # Defining optimisation problem
     g_global_step = tf.train.get_or_create_global_step()
@@ -128,7 +131,7 @@ def main(args):
                     # Single training step
                     summary_v, global_step_v, loss_v, _ = sess.run(
                         fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
-                        feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.8})
+                        feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.5})
                     summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
                     avg_loss += loss_v
 
@@ -149,10 +152,15 @@ def main(args):
                         for bucket_id in test_buckets:
                             for test_X, true_Y in feed(test_buckets[bucket_id], args.batch_size):
                                 pred_Y = nn.g_results.eval(feed_dict={nn.g_in: test_X, nn.g_dprob: 1.0})
-                                _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_Y, pred_Y).ravel()
-                                tp += cur_tp
-                                fp += cur_fp
-                                fn += cur_fn
+                                try:
+                                    _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_Y, pred_Y).ravel()
+                                    tp += cur_tp
+                                    fp += cur_fp
+                                    fn += cur_fn
+                                except Exception as e:
+                                    print(e)
+                                    print(confusion_matrix(true_Y, pred_Y).ravel())
+                                    print(confusion_matrix(true_Y, pred_Y))
                         print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%" % (
                             precision(tp, fp) * 100, recall(tp, fn) * 100, f1(tp, fp, fn) * 100
                         ))
