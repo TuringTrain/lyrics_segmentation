@@ -90,8 +90,8 @@ def main(args):
     test_buckets = compact_buckets(test_buckets)
 
     # Define the neural network
-    nn = Dense(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
-    # nn = NoPadding1Conv(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
+    # nn = Dense(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
+    nn = NoPadding1Conv(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
     # nn = MnistLike(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
 
     # Defining optimisation problem
@@ -135,7 +135,7 @@ def main(args):
                     # Single training step
                     summary_v, global_step_v, loss_v, _ = sess.run(
                         fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
-                        feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.5})
+                        feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.9})
                     summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
                     avg_loss += loss_v
 
