@@ -24,6 +24,7 @@ class NoPadding1Conv(NN):
         with tf.name_scope('input'):
             self.g_in = tf.placeholder(tf.float32, shape=[None, 2*window_size, ssm_size], name="input")
             self.g_labels = tf.placeholder(tf.int32, shape=[None], name="labels")
+            self.g_dprob = tf.placeholder(tf.float32)
 
         # Reshape to use within a convolutional neural net.
         #   contrary to mnist example, it just adds the last dimension whichs is the amount of channels in the image,
@@ -31,30 +32,49 @@ class NoPadding1Conv(NN):
         with tf.name_scope('reshape'):
             x_image = tf.expand_dims(self.g_in, -1)
 
-        # First convolutional layer - maps input to 32 feature maps.
+        # First convolutional layer - 2d convolutions with windows always capturing the borders
         with tf.name_scope('conv1'):
-            W_conv1 = self.weight_variable([window_size+1, window_size+1, 1, 32])
-            b_conv1 = self.bias_variable([32])
+            features_conv1 = 64
+            W_conv1 = self.weight_variable([window_size+1, window_size+1, 1, features_conv1])
+            b_conv1 = self.bias_variable([features_conv1])
             h_conv1 = tf.nn.conv2d(x_image, W_conv1, strides=[1, 1, 1, 1], padding='VALID')
             h_conv1 = tf.nn.relu(h_conv1 + b_conv1)
 
         # Pooling layer - downsamples by window_size.
         with tf.name_scope('pool1'):
-            h_pool1 = tf.nn.max_pool(h_conv1, ksize=[1, window_size, window_size, 1], strides=[1, window_size, window_size, 1], padding='VALID')
+            h_pool1 = tf.nn.max_pool(h_conv1, ksize=[1, window_size, window_size, 1],
+                                     strides=[1, window_size, window_size, 1], padding='VALID')
+
+        # Dropout - controls the complexity of the model, prevents co-adaptation of features
+        with tf.name_scope('conv1-dropout'):
+            h_pool1_drop = tf.nn.dropout(h_pool1, 1.0-(1.0-self.g_dprob)/2)
+
+        # Second convolutional layer - performs horizontal convolutions
+        with tf.name_scope('conv2'):
+            features_conv2 = 128
+            W_conv2 = self.weight_variable([1, window_size, features_conv1, features_conv2])
+            b_conv2 = self.bias_variable([features_conv2])
+            h_conv2 = tf.nn.conv2d(h_pool1_drop, W_conv2, strides=[1, 1, 1, 1], padding='VALID')
+            h_conv2 = tf.nn.relu(h_conv2 + b_conv2)
+
+        # Pooling layer - downsamples to a pixel.
+        with tf.name_scope('pool2'):
+            pool_size = int(ssm_size / window_size) - window_size
+            h_pool2 = tf.nn.max_pool(h_conv2, ksize=[1, 1, pool_size, 1],
+                                     strides=[1, 1, pool_size, 1], padding='VALID')
 
         # We have to either fix the ssm_size or do an average here
-        fc1_size = 512
-        fc1_input_size = (int(ssm_size / window_size) - 1) * 32
+        fc1_size = 128
+        fc1_input_size = features_conv2
         with tf.name_scope('fc1'):
             W_fc1 = self.weight_variable([fc1_input_size, fc1_size])
             b_fc1 = self.bias_variable([fc1_size])
 
-            h_pool2_flat = tf.reshape(h_pool1, [-1, fc1_input_size])
+            h_pool2_flat = tf.reshape(h_pool2, [-1, fc1_input_size])
             h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
 
         # Dropout - controls the complexity of the model, prevents co-adaptation of features
         with tf.name_scope('dropout'):
-            self.g_dprob = tf.placeholder(tf.float32)
             h_fc1_drop = tf.nn.dropout(h_fc1, self.g_dprob)
 
         # Map the features to 2 classes

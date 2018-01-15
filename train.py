@@ -135,7 +135,7 @@ def main(args):
                     # Single training step
                     summary_v, global_step_v, loss_v, _ = sess.run(
                         fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
-                        feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.9})
+                        feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.6})
                     summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
                     avg_loss += loss_v
 
