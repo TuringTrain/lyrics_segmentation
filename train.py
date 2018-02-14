@@ -1,9 +1,12 @@
 from cnn.dense import Dense
 from cnn.mnist_like import MnistLike
 from cnn.no_padding_1conv import NoPadding1Conv
-from extract_features import tensor_from_ssm, labels_from_label_array
+from extract_features import tensor_from_ssm, tensor_from_two_ssms, labels_from_label_array
 from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets
-from util.load_data import load_ssm_string, load_segment_borders
+
+from util.load_data import load_ssm_string, load_ssm_phonetics
+from util.load_data import load_segment_borders
+from util.load_data import load_segment_borders_watanabe, load_segment_borders_for_genre
 
 import argparse
 import math
@@ -30,8 +33,22 @@ def main(args):
     # Load the data
     print("Loading data...")
     timestamp = time()
+
+    # load different aligned SSMs
     ssm_string_data = load_ssm_string(args.data)
+    ssm_phonetics_data = load_ssm_phonetics(args.data)
+
     segment_borders = load_segment_borders(args.data)
+
+    if not args.genre:
+        train_borders, dev_borders, test_borders = load_segment_borders_watanabe(args.data)
+    else:
+        # load dev/test for some genre only (training is always on whole Watanabe train set)
+        train_borders, dev_borders, test_borders = load_segment_borders_for_genre(args.data, args.genre)
+
+    train_borders_set = set(train_borders.id)
+    dev_borders_set = set(dev_borders.id)
+    train_dev_borders_set = train_borders_set.union(dev_borders_set)
     print("Done in %.1fs" % tdiff(timestamp))
 
     # Figure out the maximum ssm size
@@ -40,6 +57,11 @@ def main(args):
     max_ssm_size = 0
     counter = 0
     for ssm_obj in ssm_string_data.itertuples():
+        current_id = ssm_obj.id
+        #skip ids not in training or dev
+        if not current_id in train_dev_borders_set:
+            continue
+
         counter += 1
         max_ssm_size = max(max_ssm_size, ssm_obj.ssm.shape[0])
     print("Done in %.1fs (%.2fk items, max ssm size: %d)" % (tdiff(timestamp), k(counter), max_ssm_size))
@@ -52,10 +74,27 @@ def main(args):
     filtered = 0
     timestamp = time()
     max_ssm_size = min(max_ssm_size, args.max_ssm_size)
+
+    #allow indexed access to dataframe
+    ssm_string_data.set_index(['id'], inplace=True)
+    ssm_phonetics_data.set_index(['id'], inplace=True)
+
     for borders_obj in segment_borders.itertuples():
         counter += 1
-        ssm = ssm_string_data.loc[borders_obj.id].ssm
-        ssm_size = ssm.shape[0]
+
+        # temp. speedup for debugging
+        #if counter % 100 != 0:
+        #    continue
+
+        current_id = borders_obj.id
+
+        #skip ids not in training or dev
+        if not current_id in train_dev_borders_set:
+            continue
+
+        ssm_string = ssm_string_data.loc[current_id].ssm
+        ssm_phonetics = ssm_phonetics_data.loc[current_id].ssm
+        ssm_size = ssm_string.shape[0]
 
         # Reporting
         if counter % 10000 == 0:
@@ -72,16 +111,33 @@ def main(args):
         if not args.buckets:
             bucket_size = max_ssm_size
         bucket_id = int(math.ceil(math.log2(bucket_size)))
-        ssm_tensor = tensor_from_ssm(ssm, 2**bucket_id, args.window_size)
+
+        # one tensor for one song
+        # ssm_tensor = tensor_from_ssm(ssm_string, 2**bucket_id, args.window_size)
+        ssm_tensor = tensor_from_two_ssms(ssm_string, ssm_phonetics, 2**bucket_id, args.window_size)
         ssm_labels = labels_from_label_array(borders_obj.borders, ssm_size)
 
         # 10% goes to test set
-        if random() > 0.9:
-            add_to_buckets(test_buckets, bucket_id, ssm_tensor, ssm_labels)
-        else:
+        #if random() > 0.9:
+        #    add_to_buckets(test_buckets, bucket_id, ssm_tensor, ssm_labels)
+        #else:
+        #    add_to_buckets(train_buckets, bucket_id, ssm_tensor, ssm_labels)
+
+        # fill train/test buckets according to definition files
+        if current_id in train_borders_set:
             add_to_buckets(train_buckets, bucket_id, ssm_tensor, ssm_labels)
+        else:
+            assert current_id in dev_borders_set, 'id ' + current_id + ' is neither in train nor in dev!'
+            add_to_buckets(test_buckets, bucket_id, ssm_tensor, ssm_labels)
+
     del ssm_string_data
     del segment_borders
+    del train_borders
+    del dev_borders
+    del test_borders
+    del train_borders_set
+    del dev_borders_set
+    del train_dev_borders_set
 
     # Compacting buckets and printing statistics
     print("Training set buckets:")
@@ -184,6 +240,7 @@ if __name__ == '__main__':
                         help='The directory with the data')
     parser.add_argument('--output', required=True,
                         help='Output path')
+    parser.add_argument('--genre')
     parser.add_argument('--batch-size', type=int, default=256,
                         help='The size of a mini-batch')
     parser.add_argument('--max-epoch', type=int, default=5,
@@ -194,7 +251,7 @@ if __name__ == '__main__':
                         help='Minimum size of the ssm matrix')
     parser.add_argument('--max-ssm-size', type=int, default=128,
                         help='Maximum size of the ssm matrix')
-    parser.add_argument('--report-period', type=int, default=1000,
+    parser.add_argument('--report-period', type=int, default=100,
                         help='When to report stats')
     parser.add_argument('--buckets', default=False, action='store_true',
                         help='Enable buckets')

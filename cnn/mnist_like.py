@@ -21,19 +21,22 @@ class MnistLike(NN):
         # Labels of size:
         #   batch_size
         # Note that we do not fix the first dimension to allow flexible batch_size for evaluation / leftover samples
+        channels = 2
         with tf.name_scope('input'):
-            self.g_in = tf.placeholder(tf.float32, shape=[None, 2*window_size, ssm_size], name="input")
+            self.g_in = tf.placeholder(tf.float32, shape=[None, 2*window_size, ssm_size, channels], name="input")
             self.g_labels = tf.placeholder(tf.int32, shape=[None], name="labels")
 
         # Reshape to use within a convolutional neural net.
         #   contrary to mnist example, it just adds the last dimension whichs is the amount of channels in the image,
         #   in our case its only one, if we will add more features for each line – they will go there
         with tf.name_scope('reshape'):
-            x_image = tf.expand_dims(self.g_in, -1)
+            # x_image = tf.expand_dims(self.g_in, -1)
+            #   no reshaping necessary as incoming tensor has number of channels as lowest rank
+            x_image = self.g_in
 
         # First convolutional layer - maps one grayscale image to 32 feature maps.
         with tf.name_scope('conv1'):
-            W_conv1 = self.weight_variable([window_size+1, window_size+1, 1, 32])
+            W_conv1 = self.weight_variable([window_size+1, window_size+1, channels, 32])
             b_conv1 = self.bias_variable([32])
             h_conv1 = tf.nn.relu(self.conv2d(x_image, W_conv1) + b_conv1)
 
