@@ -198,14 +198,14 @@ def main(args):
                     # Reporting
                     if global_step_v % args.report_period == 0:
                         print("Iter %d" % global_step_v)
-                        print("  epoch %.0f, avg.loss %.2f, time per iter %.2fs" % (
+                        print("  epoch %.0f, avg.loss %.4f, iter/s %.4fs" % (
                             epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
                         ))
                         timestamp = time()
                         avg_loss = 0.0
 
                     # Evaluation
-                    if global_step_v % (args.report_period*2) == 0:
+                    if global_step_v % (args.report_period*10) == 0:
                         tp = 0
                         fp = 0
                         fn = 0
@@ -226,7 +226,7 @@ def main(args):
                         ))
 
                     # Checkpointing
-                    if global_step_v % 1000 == 0:
+                    if global_step_v % 10000 == 0:
                         real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
                         print("Saved the checkpoint to: %s" % real_save_path)
 

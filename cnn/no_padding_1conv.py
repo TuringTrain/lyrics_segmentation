@@ -37,7 +37,7 @@ class NoPadding1Conv(NN):
 
         # First convolutional layer - 2d convolutions with windows always capturing the borders
         with tf.name_scope('conv1'):
-            features_conv1 = 64
+            features_conv1 = 256
             W_conv1 = self.weight_variable([window_size+1, window_size+1, channels, features_conv1])
             b_conv1 = self.bias_variable([features_conv1])
             h_conv1 = tf.nn.conv2d(x_image, W_conv1, strides=[1, 1, 1, 1], padding='VALID')
@@ -54,7 +54,7 @@ class NoPadding1Conv(NN):
 
         # Second convolutional layer - performs horizontal convolutions
         with tf.name_scope('conv2'):
-            features_conv2 = 128
+            features_conv2 = 512
             W_conv2 = self.weight_variable([1, window_size, features_conv1, features_conv2])
             b_conv2 = self.bias_variable([features_conv2])
             h_conv2 = tf.nn.conv2d(h_pool1_drop, W_conv2, strides=[1, 1, 1, 1], padding='VALID')
@@ -67,30 +67,37 @@ class NoPadding1Conv(NN):
                                      strides=[1, 1, pool_size, 1], padding='VALID')
 
         # We have to either fix the ssm_size or do an average here
-        fc1_size = 128
-        fc1_input_size = features_conv2
-        with tf.name_scope('fc1'):
-            W_fc1 = self.weight_variable([fc1_input_size, fc1_size])
-            b_fc1 = self.bias_variable([fc1_size])
+        fc_input_size = features_conv2
+        fc_size = 512
+        fc_input = tf.reshape(h_pool2, [-1, fc_input_size])
+        for fc_id in range(3):
+            with tf.name_scope('fc-%d' % fc_id):
+                W_fc = self.weight_variable([fc_input_size, fc_size])
+                b_fc = self.bias_variable([fc_size])
 
-            h_pool2_flat = tf.reshape(h_pool2, [-1, fc1_input_size])
-            h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
-
-        # Dropout - controls the complexity of the model, prevents co-adaptation of features
-        with tf.name_scope('dropout'):
-            h_fc1_drop = tf.nn.dropout(h_fc1, self.g_dprob)
+                h_fc = tf.nn.tanh(tf.matmul(fc_input, W_fc) + b_fc)
+                fc_input = tf.nn.dropout(h_fc, self.g_dprob)
+                fc_input_size = fc_size
 
         # Map the features to 2 classes
-        with tf.name_scope('fc2'):
-            W_fc2 = self.weight_variable([fc1_size, 2])
-            b_fc2 = self.bias_variable([2])
+        with tf.name_scope('fc-softmax'):
+            W_fcs = self.weight_variable([fc_size, 2])
+            b_fcs = self.bias_variable([2])
 
-            self.g_out = tf.matmul(h_fc1_drop, W_fc2) + b_fc2
+            self.g_out = tf.matmul(fc_input, W_fcs) + b_fcs
+
+
+        # Regularization
+        weights = tf.trainable_variables()
+        l2_regularizer = tf.contrib.layers.l2_regularizer(
+            scale=0.001, scope=None
+        )
+        l2_reg = tf.contrib.layers.apply_regularization(l2_regularizer, weights)
 
         # Loss
         with tf.name_scope('loss'):
             losses = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.g_labels, logits=self.g_out)
-            self.g_loss = tf.reduce_mean(losses)
+            self.g_loss = tf.reduce_mean(losses) + l2_reg
 
         # Evaluation
         with tf.name_scope('evaluation'):

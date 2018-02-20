@@ -81,7 +81,7 @@ def tensor_from_two_ssms(ssm_some: np.ndarray, ssm_other: np.ndarray, pad_to_siz
     dim_layers = 2    # number of SSM layers used
     dim_y = 2 * half_window
     dim_z = pad_to_size
-    tensor = np.empty([dim_x, dim_layers, dim_y, dim_z], dtype=np.float32)
+    tensor = np.empty([dim_x, dim_y, dim_z, dim_layers], dtype=np.float32)
     for line in range(ssm_size):
         # lower and upper bounds of the window
         lower = line - half_window + 1
@@ -121,7 +121,7 @@ def tensor_from_two_ssms(ssm_some: np.ndarray, ssm_other: np.ndarray, pad_to_siz
 
 
         # stack SSMs on top of each other
-        td_lr_padded_patch_layered = np.stack([td_lr_padded_patch_some, td_lr_padded_patch_other], axis=0)
+        td_lr_padded_patch_layered = np.stack([td_lr_padded_patch_some, td_lr_padded_patch_other], axis=-1)
 
         tensor[line] = td_lr_padded_patch_layered
 
@@ -151,8 +151,6 @@ def tensor_from_two_ssms(ssm_some: np.ndarray, ssm_other: np.ndarray, pad_to_siz
         # print('td_lr_padded_patch_layered.shape', td_lr_padded_patch_layered.shape)
         # print()
         # print('tensor.shape:', tensor.shape)
-    tensor = np.swapaxes(tensor, 1, 2)
-    tensor = np.swapaxes(tensor, 2, 3)
     return tensor
 
 
