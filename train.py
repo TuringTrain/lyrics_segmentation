@@ -4,8 +4,7 @@ from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_multiple_ssms, labels_from_label_array
 from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets
 
-from util.load_data import load_ssm_string, load_ssm_phonetics
-from util.load_data import load_linewise_length_chars, load_linewise_length_tokens, load_linewise_length_syllables
+from util.load_data import load_ssm_string, load_ssm_phonetics, load_ssms_from
 from util.load_data import load_segment_borders, load_segment_borders_watanabe, load_segment_borders_for_genre
 
 import argparse
@@ -37,10 +36,13 @@ def main(args):
     # load different aligned SSMs
     multiple_ssms_data = [load_ssm_string(args.data),\
                           #load_ssm_phonetics(args.data),\
-                          #load_linewise_length_chars(args.data),\
-                          #load_linewise_length_tokens(args.data),\
-                          #load_linewise_length_syllables(args.data),\
                           ]
+    multiple_ssms_data.extend(
+                       load_ssms_from(args.data,
+                         ['syllables',\
+                         #'line_length_in_syllables',\
+                         ]))
+
     channels = len(multiple_ssms_data)
     print("Found", channels, "SSM channels")
 
