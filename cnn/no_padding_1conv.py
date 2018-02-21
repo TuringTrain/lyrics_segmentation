@@ -4,7 +4,7 @@ from cnn.nn import NN
 
 
 class NoPadding1Conv(NN):
-    def __init__(self, window_size, ssm_size):
+    def __init__(self, window_size, ssm_size, channels):
         super().__init__()
 
         self.g_dprob = None
@@ -12,16 +12,16 @@ class NoPadding1Conv(NN):
 
         self.window_size = window_size
         self.ssm_size = ssm_size
+        self.channels = channels
 
-        self.define(window_size, ssm_size)
+        self.define(window_size, ssm_size, channels)
 
-    def define(self, window_size, ssm_size):
+    def define(self, window_size, ssm_size, channels):
         # Input of size:
         #   batch_size x window_size x max_ssm_size
         # Labels of size:
         #   batch_size
         # Note that we do not fix the first dimension to allow flexible batch_size for evaluation / leftover samples
-        channels = 2
         with tf.name_scope('input'):
             self.g_in = tf.placeholder(tf.float32, shape=[None, 2*window_size, ssm_size, channels], name="input")
             self.g_labels = tf.placeholder(tf.int32, shape=[None], name="labels")

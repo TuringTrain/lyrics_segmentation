@@ -1,12 +1,12 @@
 from cnn.dense import Dense
 from cnn.mnist_like import MnistLike
 from cnn.no_padding_1conv import NoPadding1Conv
-from extract_features import tensor_from_ssm, tensor_from_two_ssms, labels_from_label_array
+from extract_features import tensor_from_multiple_ssms, labels_from_label_array
 from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets
 
 from util.load_data import load_ssm_string, load_ssm_phonetics
-from util.load_data import load_segment_borders
-from util.load_data import load_segment_borders_watanabe, load_segment_borders_for_genre
+from util.load_data import load_linewise_length_chars, load_linewise_length_tokens, load_linewise_length_syllables
+from util.load_data import load_segment_borders, load_segment_borders_watanabe, load_segment_borders_for_genre
 
 import argparse
 import math
@@ -35,8 +35,14 @@ def main(args):
     timestamp = time()
 
     # load different aligned SSMs
-    ssm_string_data = load_ssm_string(args.data)
-    ssm_phonetics_data = load_ssm_phonetics(args.data)
+    multiple_ssms_data = [load_ssm_string(args.data),\
+                          #load_ssm_phonetics(args.data),\
+                          #load_linewise_length_chars(args.data),\
+                          #load_linewise_length_tokens(args.data),\
+                          #load_linewise_length_syllables(args.data),\
+                          ]
+    channels = len(multiple_ssms_data)
+    print("Found", channels, "SSM channels")
 
     segment_borders = load_segment_borders(args.data)
 
@@ -56,7 +62,7 @@ def main(args):
     timestamp = time()
     max_ssm_size = 0
     counter = 0
-    for ssm_obj in ssm_string_data.itertuples():
+    for ssm_obj in multiple_ssms_data[0].itertuples():
         current_id = ssm_obj.id
         #skip ids not in training or dev
         if not current_id in train_dev_borders_set:
@@ -75,9 +81,9 @@ def main(args):
     timestamp = time()
     max_ssm_size = min(max_ssm_size, args.max_ssm_size)
 
-    #allow indexed access to dataframe
-    ssm_string_data.set_index(['id'], inplace=True)
-    ssm_phonetics_data.set_index(['id'], inplace=True)
+    #allow indexed access to dataframes
+    for elem in multiple_ssms_data:
+        elem.set_index(['id'], inplace=True)
 
     for borders_obj in segment_borders.itertuples():
         counter += 1
@@ -92,9 +98,11 @@ def main(args):
         if not current_id in train_dev_borders_set:
             continue
 
-        ssm_string = ssm_string_data.loc[current_id].ssm
-        ssm_phonetics = ssm_phonetics_data.loc[current_id].ssm
-        ssm_size = ssm_string.shape[0]
+        ssm_elems = []
+        for single_ssm in multiple_ssms_data:
+            ssm_elems.append(single_ssm.loc[current_id].ssm)
+
+        ssm_size = ssm_elems[0].shape[0]
 
         # Reporting
         if counter % 10000 == 0:
@@ -113,8 +121,7 @@ def main(args):
         bucket_id = int(math.ceil(math.log2(bucket_size)))
 
         # one tensor for one song
-        # ssm_tensor = tensor_from_ssm(ssm_string, 2**bucket_id, args.window_size)
-        ssm_tensor = tensor_from_two_ssms(ssm_string, ssm_phonetics, 2**bucket_id, args.window_size)
+        ssm_tensor = tensor_from_multiple_ssms(ssm_elems, 2**bucket_id, args.window_size)
         ssm_labels = labels_from_label_array(borders_obj.borders, ssm_size)
 
         # 10% goes to test set
@@ -130,7 +137,7 @@ def main(args):
             assert current_id in dev_borders_set, 'id ' + current_id + ' is neither in train nor in dev!'
             add_to_buckets(test_buckets, bucket_id, ssm_tensor, ssm_labels)
 
-    del ssm_string_data
+    del multiple_ssms_data
     del segment_borders
     del train_borders
     del dev_borders
@@ -147,8 +154,8 @@ def main(args):
 
     # Define the neural network
     # nn = Dense(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
-    nn = NoPadding1Conv(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
-    # nn = MnistLike(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
+    nn = NoPadding1Conv(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()), channels=channels)
+    # nn = MnistLike(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()), channels=channels)
 
     # Defining optimisation problem
     g_global_step = tf.train.get_or_create_global_step()

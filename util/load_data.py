@@ -26,6 +26,22 @@ def load_ssm_phonetics(data_path: str) -> pd.DataFrame:
         sppm = store['mdb_127_en_phonetics_1'].append(store['mdb_127_en_phonetics_2'])
     return sppm
 
+def load_linewise_length_chars(data_path: str) -> pd.DataFrame:
+    with pd.HDFStore(path.join(data_path, 'ssm_store_pub1.hdf')) as store:
+        ssm_linewise = store['mdb_127_en_line_length_in_chars']
+    return ssm_linewise
+
+def load_linewise_length_tokens(data_path: str) -> pd.DataFrame:
+    with pd.HDFStore(path.join(data_path, 'ssm_store_pub1.hdf')) as store:
+        ssm_linewise = store['mdb_127_en_line_length_in_tokens']
+    return ssm_linewise
+
+def load_linewise_length_syllables(data_path: str) -> pd.DataFrame:
+    with pd.HDFStore(path.join(data_path, 'ssm_store_pub1.hdf')) as store:
+        ssm_linewise = store['mdb_127_en_line_length_in_syllables']
+    return ssm_linewise
+
+
 # train and test on all genres
 def load_segment_borders_watanabe(data_path: str) -> pd.DataFrame:
     with pd.HDFStore(path.join(data_path, 'borders_pub2.hdf')) as store:
