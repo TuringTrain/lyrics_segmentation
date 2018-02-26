@@ -196,11 +196,14 @@ def main(args):
         # Training loop
         for epoch in range(args.max_epoch):
             for bucket_id in train_buckets:
-                for batch_X, batch_Y in feed(train_buckets[bucket_id], args.batch_size):
+                for batch_X, batch_X_add_feat, batch_Y in feed(train_buckets[bucket_id], args.batch_size):
                     # Single training step
                     summary_v, global_step_v, loss_v, _ = sess.run(
                         fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
-                        feed_dict={nn.g_in: batch_X, nn.g_labels: batch_Y, nn.g_dprob: 0.6})
+                        feed_dict={nn.g_in: batch_X,
+                                   nn.g_labels: batch_Y,
+                                   nn.g_dprob: 0.6,
+                                   nn.g_add_feat: batch_X_add_feat})
                     summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
                     avg_loss += loss_v
 

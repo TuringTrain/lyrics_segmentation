@@ -26,6 +26,8 @@ class NoPadding1Conv(NN):
             self.g_in = tf.placeholder(tf.float32, shape=[None, 2*window_size, ssm_size, channels], name="input")
             self.g_labels = tf.placeholder(tf.int32, shape=[None], name="labels")
             self.g_dprob = tf.placeholder(tf.float32)
+            add_feature_size = 5
+            self.g_add_feat = tf.placeholder(tf.float32, shape=[None, add_feature_size], name="additional_features")
 
         # Reshape to use within a convolutional neural net.
         #   contrary to mnist example, it just adds the last dimension whichs is the amount of channels in the image,
@@ -69,7 +71,10 @@ class NoPadding1Conv(NN):
         # We have to either fix the ssm_size or do an average here
         fc_input_size = features_conv2
         fc_size = 512
-        fc_input = tf.reshape(h_pool2, [-1, fc_input_size])
+        fc_input = tf.concat(
+            tf.reshape(h_pool2, [-1, fc_input_size]),
+            self.g_add_feat
+        )
         for fc_id in range(3):
             with tf.name_scope('fc-%d' % fc_id):
                 W_fc = self.weight_variable([fc_input_size, fc_size])
