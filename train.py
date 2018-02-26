@@ -222,8 +222,12 @@ def main(args):
                         fp = 0
                         fn = 0
                         for bucket_id in test_buckets:
-                            for test_X, true_Y in feed(test_buckets[bucket_id], args.batch_size):
-                                pred_Y = nn.g_results.eval(feed_dict={nn.g_in: test_X, nn.g_dprob: 1.0})
+                            for test_X, text_X_add_feat, true_Y in feed(test_buckets[bucket_id], args.batch_size):
+                                pred_Y = nn.g_results.eval(feed_dict={
+                                    nn.g_in: test_X,
+                                    nn.g_dprob: 1.0,
+                                    nn.g_add_feat: text_X_add_feat
+                                })
                                 try:
                                     _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_Y, pred_Y).ravel()
                                     tp += cur_tp
