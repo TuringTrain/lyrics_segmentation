@@ -4,7 +4,7 @@ from cnn.nn import NN
 
 
 class NoPadding1Conv(NN):
-    def __init__(self, window_size, ssm_size, channels):
+    def __init__(self, window_size, ssm_size, added_features_size, channels):
         super().__init__()
 
         self.g_dprob = None
@@ -12,11 +12,12 @@ class NoPadding1Conv(NN):
 
         self.window_size = window_size
         self.ssm_size = ssm_size
+        self.added_features_size = added_features_size
         self.channels = channels
 
-        self.define(window_size, ssm_size, channels)
+        self.define(window_size, ssm_size, added_features_size, channels)
 
-    def define(self, window_size, ssm_size, channels):
+    def define(self, window_size, ssm_size, added_features_size, channels):
         # Input of size:
         #   batch_size x window_size x max_ssm_size
         # Labels of size:
@@ -26,8 +27,7 @@ class NoPadding1Conv(NN):
             self.g_in = tf.placeholder(tf.float32, shape=[None, 2*window_size, ssm_size, channels], name="input")
             self.g_labels = tf.placeholder(tf.int32, shape=[None], name="labels")
             self.g_dprob = tf.placeholder(tf.float32)
-            add_feature_size = 5
-            self.g_add_feat = tf.placeholder(tf.float32, shape=[None, add_feature_size], name="additional_features")
+            self.g_added_features = tf.placeholder(tf.float32, shape=[None, added_features_size], name="additional_features")
 
         # Reshape to use within a convolutional neural net.
         #   contrary to mnist example, it just adds the last dimension whichs is the amount of channels in the image,
@@ -73,7 +73,7 @@ class NoPadding1Conv(NN):
         fc_size = 512
         fc_input = tf.concat(
             tf.reshape(h_pool2, [-1, fc_input_size]),
-            self.g_add_feat
+            self.g_added_features
         )
         for fc_id in range(3):
             with tf.name_scope('fc-%d' % fc_id):

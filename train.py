@@ -18,11 +18,12 @@ from os import path
 from tensorflow.contrib import slim
 
 
-def add_to_buckets(buckets: dict(), bucket_id: int, tensor: np.ndarray, labels: np.ndarray) -> None:
+def add_to_buckets(buckets: dict(), bucket_id: int, tensor: np.ndarray, added_features: np.ndarray, labels: np.ndarray) -> None:
     if bucket_id not in buckets:
-        buckets[bucket_id] = ([], [])
-    X, Y = buckets[bucket_id]
+        buckets[bucket_id] = ([], [], [])
+    X, X_added, Y = buckets[bucket_id]
     X.append(tensor)
+    X_added.append(added_features)
     Y.append(labels)
 
 
@@ -39,7 +40,7 @@ def main(args):
                           ]
     multiple_ssms_data.extend(
                        load_ssms_from(args.data,
-                         ['syllables',\
+                         [#'syllables',\
                          #'line_length_in_syllables',\
                          ]))
 
@@ -91,8 +92,8 @@ def main(args):
         counter += 1
 
         # temp. speedup for debugging
-        #if counter % 100 != 0:
-        #    continue
+        if counter % 100 != 0:
+            continue
 
         current_id = borders_obj.id
 
@@ -133,13 +134,18 @@ def main(args):
         #    add_to_buckets(train_buckets, bucket_id, ssm_tensor, ssm_labels)
 
         # fill train/test buckets according to definition files
+
+        added_features = np.zeros((ssm_size, 2), dtype=float)
+        added_feats_count = added_features.shape[1]
+
         if current_id in train_borders_set:
-            add_to_buckets(train_buckets, bucket_id, ssm_tensor, ssm_labels)
+            add_to_buckets(train_buckets, bucket_id, ssm_tensor, added_features, ssm_labels)
         else:
             assert current_id in dev_borders_set, 'id ' + current_id + ' is neither in train nor in dev!'
-            add_to_buckets(test_buckets, bucket_id, ssm_tensor, ssm_labels)
+            add_to_buckets(test_buckets, bucket_id, ssm_tensor, added_features, ssm_labels)
 
     del multiple_ssms_data
+    del added_features
     del segment_borders
     del train_borders
     del dev_borders
@@ -156,7 +162,7 @@ def main(args):
 
     # Define the neural network
     # nn = Dense(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
-    nn = NoPadding1Conv(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()), channels=channels)
+    nn = NoPadding1Conv(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()), added_features_size = added_feats_count, channels=channels)
     # nn = MnistLike(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()), channels=channels)
 
     # Defining optimisation problem
@@ -196,14 +202,14 @@ def main(args):
         # Training loop
         for epoch in range(args.max_epoch):
             for bucket_id in train_buckets:
-                for batch_X, batch_X_add_feat, batch_Y in feed(train_buckets[bucket_id], args.batch_size):
+                for batch_X, batch_X_added_feats, batch_Y in feed(train_buckets[bucket_id], args.batch_size):
                     # Single training step
                     summary_v, global_step_v, loss_v, _ = sess.run(
                         fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
                         feed_dict={nn.g_in: batch_X,
                                    nn.g_labels: batch_Y,
                                    nn.g_dprob: 0.6,
-                                   nn.g_add_feat: batch_X_add_feat})
+                                   nn.g_added_features: batch_X_added_feats})
                     summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
                     avg_loss += loss_v
 
@@ -222,11 +228,11 @@ def main(args):
                         fp = 0
                         fn = 0
                         for bucket_id in test_buckets:
-                            for test_X, text_X_add_feat, true_Y in feed(test_buckets[bucket_id], args.batch_size):
+                            for test_X, text_X_added_feats, true_Y in feed(test_buckets[bucket_id], args.batch_size):
                                 pred_Y = nn.g_results.eval(feed_dict={
                                     nn.g_in: test_X,
                                     nn.g_dprob: 1.0,
-                                    nn.g_add_feat: text_X_add_feat
+                                    nn.g_addded_features: text_X_added_feats
                                 })
                                 try:
                                     _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_Y, pred_Y).ravel()
