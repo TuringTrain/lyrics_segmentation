@@ -69,12 +69,18 @@ class NoPadding1Conv(NN):
                                      strides=[1, 1, pool_size, 1], padding='VALID')
 
         # We have to either fix the ssm_size or do an average here
-        fc_input_size = features_conv2
+        fc_input_size = features_conv2 + added_features_size
         fc_size = 512
+        print('image_features.shape:', tf.reshape(h_pool2, [-1, features_conv2]).shape)
+        print('added_features.shape:', self.g_added_features.shape)
         fc_input = tf.concat(
-            tf.reshape(h_pool2, [-1, fc_input_size]),
+            (
+            tf.reshape(h_pool2, [-1, features_conv2]),
             self.g_added_features
+            ),
+            axis = 1
         )
+        print('combined.shape:', fc_input.shape)
         for fc_id in range(3):
             with tf.name_scope('fc-%d' % fc_id):
                 W_fc = self.weight_variable([fc_input_size, fc_size])

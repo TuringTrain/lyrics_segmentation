@@ -13,6 +13,7 @@ def compact_buckets(buckets: dict()) -> dict():
     largest_bucket_id_len = (0, 0)
     for bucket_id in buckets:
         X, X_added, Y = buckets[bucket_id]
+        #print('\n\n', X, X_added, Y)
         buckets[bucket_id] = (np.vstack(X), np.vstack(X_added), np.concatenate(Y))
         bucket_len = buckets[bucket_id][2].shape[0]
         print("  max: %3d len: %d" % (2 ** bucket_id, bucket_len))

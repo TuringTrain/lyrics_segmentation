@@ -4,7 +4,7 @@ from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_multiple_ssms, labels_from_label_array
 from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets
 
-from util.load_data import load_ssm_string, load_ssm_phonetics, load_ssms_from
+from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature
 from util.load_data import load_segment_borders, load_segment_borders_watanabe, load_segment_borders_for_genre
 
 import argparse
@@ -38,16 +38,11 @@ def main(args):
     multiple_ssms_data = [load_ssm_string(args.data),\
                           #load_ssm_phonetics(args.data),\
                           ]
-    multiple_ssms_data.extend(
-                       load_ssms_from(args.data,
-                         [#'syllables',\
-                         #'line_length_in_syllables',\
-                         ]))
-
     channels = len(multiple_ssms_data)
     print("Found", channels, "SSM channels")
 
     segment_borders = load_segment_borders(args.data)
+    token_count_feat = load_linewise_feature(args.data, 'token_count')
 
     if not args.genre:
         train_borders, dev_borders, test_borders = load_segment_borders_watanabe(args.data)
@@ -87,6 +82,7 @@ def main(args):
     #allow indexed access to dataframes
     for elem in multiple_ssms_data:
         elem.set_index(['id'], inplace=True)
+    token_count_feat.set_index(['id'], inplace=True)
 
     for borders_obj in segment_borders.itertuples():
         counter += 1
@@ -125,19 +121,15 @@ def main(args):
 
         # one tensor for one song
         ssm_tensor = tensor_from_multiple_ssms(ssm_elems, 2**bucket_id, args.window_size)
-        ssm_labels = labels_from_label_array(borders_obj.borders, ssm_size)
-
-        # 10% goes to test set
-        #if random() > 0.9:
-        #    add_to_buckets(test_buckets, bucket_id, ssm_tensor, ssm_labels)
-        #else:
-        #    add_to_buckets(train_buckets, bucket_id, ssm_tensor, ssm_labels)
-
-        # fill train/test buckets according to definition files
-
-        added_features = np.zeros((ssm_size, 2), dtype=float)
+        # concatenate all added features at axis=1 here
+        added_features = token_count_feat.loc[current_id].feat_val
         added_feats_count = added_features.shape[1]
 
+        ssm_labels = labels_from_label_array(borders_obj.borders, ssm_size)
+
+
+
+        # fill train/test buckets according to definition files
         if current_id in train_borders_set:
             add_to_buckets(train_buckets, bucket_id, ssm_tensor, added_features, ssm_labels)
         else:
@@ -232,7 +224,7 @@ def main(args):
                                 pred_Y = nn.g_results.eval(feed_dict={
                                     nn.g_in: test_X,
                                     nn.g_dprob: 1.0,
-                                    nn.g_addded_features: text_X_added_feats
+                                    nn.g_added_features: text_X_added_feats
                                 })
                                 try:
                                     _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_Y, pred_Y).ravel()

@@ -14,6 +14,10 @@ def load_segment_borders(data_path: str) -> pd.DataFrame:
         borders = store['mdb_127_en_seg5p']
     return borders
 
+def load_linewise_feature(data_path:str, feat_name:str) -> pd.DataFrame:
+    with pd.HDFStore(path.join(data_path, 'linewise_feats_watanabe.hdf')) as store:
+        linewise = store[feat_name]
+    return linewise
 
 def load_ssm_string(data_path: str) -> pd.DataFrame:
     with pd.HDFStore(path.join(data_path, 'ssm_store_pub1.hdf')) as store:
