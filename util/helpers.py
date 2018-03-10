@@ -1,6 +1,7 @@
 from time import time
 from sklearn.utils import shuffle
 import numpy as np
+import math
 
 
 def compact_buckets(buckets: dict()) -> dict():
@@ -27,6 +28,42 @@ def compact_buckets(buckets: dict()) -> dict():
     buckets = dict()
     buckets[largest_bucket_id] = largest_bucket_content
     return buckets
+
+
+def feed_joint(data: (np.ndarray, np.ndarray), ssm_size: int, batch_size: int) -> (np.ndarray, np.ndarray, np.ndarray):
+    """
+    Produce random batches of data from the dataset
+
+    :param data: tuple (X, X_added, Y) with feature for convolution X, feature for after convolution X_added, and labels Y
+    :param batch_size: size of the batches
+    :return: batch
+    """
+    X, _, Y = data
+    X, Y = shuffle(X, Y)
+    size = len(Y)
+
+    def put(X_batch, X_lengths, Y_batch, i, X, Y):
+        item = X[i]
+        y = Y[i]
+        pad_size = ssm_size - item.shape[0]
+
+        X_lengths.append(item.shape[0])
+        Y_batch.append(np.concatenate((y, np.zeros([pad_size]))))
+        X_batch.append(np.concatenate((
+            item,
+            np.zeros([pad_size, item.shape[1], item.shape[2], item.shape[3]])  # Padding from right
+        ), axis=0))  # Column-wise
+
+    pointer = 0
+    while pointer < size:
+        X_batch = []
+        X_lengths = []
+        Y_batch = []
+        for i in range(pointer, min(pointer+batch_size, size)):
+            put(X_batch, X_lengths, Y_batch, i, X, Y)
+
+        yield np.stack(X_batch), np.stack(X_lengths), np.stack(Y_batch)
+        pointer += batch_size
 
 
 def feed(data: (np.ndarray, np.ndarray, np.ndarray), batch_size: int) -> (np.ndarray, np.ndarray, np.ndarray):

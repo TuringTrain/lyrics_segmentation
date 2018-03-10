@@ -1,8 +1,11 @@
+from tensorflow.core.protobuf import config_pb2
+
 from cnn.dense import Dense
+from cnn.joint_rnn import JointRNN
 from cnn.mnist_like import MnistLike
 from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_multiple_ssms, labels_from_label_array
-from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets
+from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets, feed_joint
 
 from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature
 from util.load_data import load_segment_borders, load_segment_borders_watanabe, load_segment_borders_for_genre
@@ -62,7 +65,7 @@ def main(args):
     counter = 0
     for ssm_obj in multiple_ssms_data[0].itertuples():
         current_id = ssm_obj.id
-        #skip ids not in training or dev
+        # skip ids not in training or dev
         if not current_id in train_dev_borders_set:
             continue
 
@@ -79,7 +82,7 @@ def main(args):
     timestamp = time()
     max_ssm_size = min(max_ssm_size, args.max_ssm_size)
 
-    #allow indexed access to dataframes
+    # allow indexed access to dataframes
     for elem in multiple_ssms_data:
         elem.set_index(['id'], inplace=True)
     token_count_feat.set_index(['id'], inplace=True)
@@ -145,15 +148,13 @@ def main(args):
     del train_dev_borders_set
 
     # Compacting buckets and printing statistics
-    print("Training set buckets:")
-    train_buckets = compact_buckets(train_buckets)
-    print("Test set buckets:")
-    test_buckets = compact_buckets(test_buckets)
+    #print("Training set buckets:")
+    #train_buckets = compact_buckets(train_buckets)
+    #print("Test set buckets:")
+    #test_buckets = compact_buckets(test_buckets)
 
     # Define the neural network
-    # nn = Dense(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
-    nn = NoPadding1Conv(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()), added_features_size = added_feats_count, channels=channels)
-    # nn = MnistLike(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()), channels=channels)
+    nn = JointRNN(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()), added_features_size=added_feats_count, channels=channels)
 
     # Defining optimisation problem
     g_global_step = tf.train.get_or_create_global_step()
@@ -168,82 +169,88 @@ def main(args):
 
     saver = tf.train.Saver(max_to_keep=10)
 
-    with tf.Session() as sess:
-        # Checkpoint restore / variable initialising
-        save_path = path.join(args.output, 'model.ckpt')
-        latest_checkpoint = tf.train.latest_checkpoint(args.output)
-        if latest_checkpoint is None:
-            print("Initializing variables")
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.95)
+    with tf.device('/device:GPU:0'):
+        with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+            # Checkpoint restore / variable initialising
+            save_path = path.join(args.output, 'model.ckpt')
+            latest_checkpoint = tf.train.latest_checkpoint(args.output)
+            if latest_checkpoint is None:
+                print("Initializing variables")
+                timestamp = time()
+                tf.get_variable_scope().set_initializer(tf.random_normal_initializer(mean=0.0, stddev=0.01))
+                tf.global_variables_initializer().run()
+                print("Done in %.2fs" % tdiff(timestamp))
+            else:
+                print("Restoring from checkpoint variables")
+                timestamp = time()
+                saver.restore(sess=sess, save_path=latest_checkpoint)
+                print("Done in %.2fs" % tdiff(timestamp))
+
+            print()
             timestamp = time()
-            tf.get_variable_scope().set_initializer(tf.random_normal_initializer(mean=0.0, stddev=0.01))
-            tf.global_variables_initializer().run()
-            print("Done in %.2fs" % tdiff(timestamp))
-        else:
-            print("Restoring from checkpoint variables")
-            timestamp = time()
-            saver.restore(sess=sess, save_path=latest_checkpoint)
-            print("Done in %.2fs" % tdiff(timestamp))
+            global_step_v = 0
+            avg_loss = 0.0
 
-        print()
-        timestamp = time()
-        global_step_v = 0
-        avg_loss = 0.0
+            # Training loop
+            for epoch in range(args.max_epoch):
+                for bucket_id in train_buckets:
+                    for batch_X, batch_X_lengths, batch_Y in feed_joint(train_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size):
+                        # Single training step
+                        summary_v, global_step_v, loss_v, _ = sess.run(
+                            fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
+                            feed_dict={nn.g_in: batch_X,
+                                       nn.g_labels: batch_Y,
+                                       nn.g_dprob: 0.6,
+                                       nn.g_lengths: batch_X_lengths})
+                        summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
+                        avg_loss += loss_v
 
-        # Training loop
-        for epoch in range(args.max_epoch):
-            for bucket_id in train_buckets:
-                for batch_X, batch_X_added_feats, batch_Y in feed(train_buckets[bucket_id], args.batch_size):
-                    # Single training step
-                    summary_v, global_step_v, loss_v, _ = sess.run(
-                        fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
-                        feed_dict={nn.g_in: batch_X,
-                                   nn.g_labels: batch_Y,
-                                   nn.g_dprob: 0.6,
-                                   nn.g_added_features: batch_X_added_feats})
-                    summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
-                    avg_loss += loss_v
+                        # Reporting
+                        if global_step_v % args.report_period == 0:
+                            print("Iter %d" % global_step_v)
+                            print("  epoch %.0f, avg.loss %.4f, iter/s %.4fs" % (
+                                epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
+                            ))
+                            timestamp = time()
+                            avg_loss = 0.0
 
-                    # Reporting
-                    if global_step_v % args.report_period == 0:
-                        print("Iter %d" % global_step_v)
-                        print("  epoch %.0f, avg.loss %.4f, iter/s %.4fs" % (
-                            epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
-                        ))
-                        timestamp = time()
-                        avg_loss = 0.0
+                        # Evaluation
+                        if global_step_v % (args.report_period*10) == 0:
+                            tp = 0
+                            fp = 0
+                            fn = 0
+                            for bucket_id in test_buckets:
+                                for test_X, test_X_lengths, true_Y in feed_joint(test_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size):
+                                    # batch_size x max_len x 2
+                                    pred_Y = nn.g_out.eval(feed_dict={
+                                        nn.g_in: test_X,
+                                        nn.g_dprob: 1.0,
+                                        nn.g_lengths: test_X_lengths
+                                    })
+                                    for i in range(pred_Y.shape[0]):
+                                        pred_sample_Y = np.argmax(pred_Y[i, :test_X_lengths[i], :], axis=1)
+                                        true_sample_Y = true_Y[i, :test_X_lengths[i]]
+                                        try:
+                                            _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_sample_Y, pred_sample_Y).ravel()
+                                            tp += cur_tp
+                                            fp += cur_fp
+                                            fn += cur_fn
+                                        except Exception as e:
+                                            print(e)
+                                            print(confusion_matrix(true_Y, pred_Y).ravel())
+                                            print(confusion_matrix(true_Y, pred_Y))
+                            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%" % (
+                                precision(tp, fp) * 100, recall(tp, fn) * 100, f1(tp, fp, fn) * 100
+                            ))
 
-                    # Evaluation
-                    if global_step_v % (args.report_period*10) == 0:
-                        tp = 0
-                        fp = 0
-                        fn = 0
-                        for bucket_id in test_buckets:
-                            for test_X, text_X_added_feats, true_Y in feed(test_buckets[bucket_id], args.batch_size):
-                                pred_Y = nn.g_results.eval(feed_dict={
-                                    nn.g_in: test_X,
-                                    nn.g_dprob: 1.0,
-                                    nn.g_added_features: text_X_added_feats
-                                })
-                                try:
-                                    _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_Y, pred_Y).ravel()
-                                    tp += cur_tp
-                                    fp += cur_fp
-                                    fn += cur_fn
-                                except Exception as e:
-                                    print(e)
-                                    print(confusion_matrix(true_Y, pred_Y).ravel())
-                                    print(confusion_matrix(true_Y, pred_Y))
-                        print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%" % (
-                            precision(tp, fp) * 100, recall(tp, fn) * 100, f1(tp, fp, fn) * 100
-                        ))
+                        # Checkpointing
+                        if global_step_v % 10000 == 0:
+                            real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
+                            print("Saved the checkpoint to: %s" % real_save_path)
 
-                    # Checkpointing
-                    if global_step_v % 10000 == 0:
-                        real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
-                        print("Saved the checkpoint to: %s" % real_save_path)
-
-        real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
-        print("Saved the checkpoint to: %s" % real_save_path)
+            real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
+            print("Saved the checkpoint to: %s" % real_save_path)
 
 
 if __name__ == '__main__':
