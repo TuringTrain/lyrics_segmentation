@@ -39,7 +39,7 @@ class NoPadding1Conv(NN):
 
         # First convolutional layer - 2d convolutions with windows always capturing the borders
         with tf.name_scope('conv1'):
-            features_conv1 = 256
+            features_conv1 = 128
             W_conv1 = self.weight_variable([window_size+1, window_size+1, channels, features_conv1])
             b_conv1 = self.bias_variable([features_conv1])
             h_conv1 = tf.nn.conv2d(x_image, W_conv1, strides=[1, 1, 1, 1], padding='VALID')
@@ -56,7 +56,7 @@ class NoPadding1Conv(NN):
 
         # Second convolutional layer - performs horizontal convolutions
         with tf.name_scope('conv2'):
-            features_conv2 = 512
+            features_conv2 = 128
             W_conv2 = self.weight_variable([1, window_size, features_conv1, features_conv2])
             b_conv2 = self.bias_variable([features_conv2])
             h_conv2 = tf.nn.conv2d(h_pool1_drop, W_conv2, strides=[1, 1, 1, 1], padding='VALID')
