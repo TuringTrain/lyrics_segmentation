@@ -124,7 +124,6 @@ def windowdiff(seg1, seg2, k=None, boundary=1):
     assert len(seg1) == len(seg2), "Segments have unequal length: %d and %d" % (len(seg1), len(seg2))
     if k is None:
         k = max(1, round(len(seg1) / (2 * np.count_nonzero(seg1 == boundary))))
-    print(k)
     assert k < len(seg1), "k (%d) can't be larger than a segment length (%d)" % (k, len(seg1))
 
     wd = 0
