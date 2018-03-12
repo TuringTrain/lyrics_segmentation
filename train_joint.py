@@ -48,14 +48,14 @@ def main(args):
     token_count_feat = load_linewise_feature(args.data, 'token_count')
 
     if not args.genre:
-        train_borders, dev_borders, test_borders = load_segment_borders_watanabe(args.data)
+        train_borders, test_borders = load_segment_borders_watanabe(args.data)
     else:
         # load dev/test for some genre only (training is always on whole Watanabe train set)
-        train_borders, dev_borders, test_borders = load_segment_borders_for_genre(args.data, args.genre)
+        train_borders, test_borders = load_segment_borders_for_genre(args.data, args.genre)
 
     train_borders_set = set(train_borders.id)
-    dev_borders_set = set(dev_borders.id)
-    train_dev_borders_set = train_borders_set.union(dev_borders_set)
+    test_borders_set = set(test_borders.id)
+    train_dev_borders_set = train_borders_set.union(test_borders_set)
     print("Done in %.1fs" % tdiff(timestamp))
 
     # Figure out the maximum ssm size
@@ -134,17 +134,16 @@ def main(args):
         if current_id in train_borders_set:
             add_to_buckets(train_buckets, bucket_id, ssm_tensor, added_features, ssm_labels)
         else:
-            assert current_id in dev_borders_set, 'id ' + current_id + ' is neither in train nor in dev!'
+            assert current_id in test_borders_set, 'id ' + current_id + ' is neither in train nor in dev!'
             add_to_buckets(test_buckets, bucket_id, ssm_tensor, added_features, ssm_labels)
 
     del multiple_ssms_data
     del added_features
     del segment_borders
     del train_borders
-    del dev_borders
     del test_borders
     del train_borders_set
-    del dev_borders_set
+    del test_borders_set
     del train_dev_borders_set
 
     # Compacting buckets and printing statistics
@@ -191,6 +190,10 @@ def main(args):
             timestamp = time()
             global_step_v = 0
             avg_loss = 0.0
+
+            eval_precisions = []
+            eval_recalls = []
+            eval_fscores = []
 
             # Training loop
             for epoch in range(args.max_epoch):
@@ -240,17 +243,37 @@ def main(args):
                                             print(e)
                                             print(confusion_matrix(true_Y, pred_Y).ravel())
                                             print(confusion_matrix(true_Y, pred_Y))
+
+                            current_precision = precision(tp, fp) * 100
+                            current_recall = recall(tp, fn) * 100
+                            current_fscore = f1(tp, fp, fn) * 100
+                            eval_precisions.append(current_precision)
+                            eval_recalls.append(current_recall)
+                            eval_fscores.append(current_fscore)
                             print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%" % (
-                                precision(tp, fp) * 100, recall(tp, fn) * 100, f1(tp, fp, fn) * 100
+                                current_precision, current_recall, current_fscore
                             ))
 
                         # Checkpointing
-                        if global_step_v % 10000 == 0:
+                        if global_step_v % 1000 == 0:
                             real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
                             print("Saved the checkpoint to: %s" % real_save_path)
+                            print('precisions:', eval_precisions)
+                            print('recalls:', eval_recalls)
+                            print('fscores:', eval_fscores)
+
 
             real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
             print("Saved the checkpoint to: %s" % real_save_path)
+            print('total precisions:', eval_precisions)
+            print('total recalls:', eval_recalls)
+            print('total fscores:', eval_fscores)
+            print('--------------')
+            n = 10
+            print('n =',n)
+            print('avg. of last n precisions:', np.round(np.median(eval_precisions[-n:]), 1), '+-', np.round(np.std(eval_precisions[-n:]), 1), '%')
+            print('avg. of last n recalls   :', np.round(np.median(eval_recalls[-n:]), 1), '+-', np.round(np.std(eval_recalls[-n:]), 1), '%')
+            print('avg. of last n fscores   :', np.round(np.median(eval_fscores[-n:]), 1), '+-', np.round(np.std(eval_fscores[-n:]), 1), '%')
 
 
 if __name__ == '__main__':

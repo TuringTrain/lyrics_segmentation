@@ -4,7 +4,7 @@ from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_multiple_ssms, labels_from_label_array
 from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets
 
-from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature
+from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature, load_ssm_lex_struct_watanabe
 from util.load_data import load_segment_borders, load_segment_borders_watanabe, load_segment_borders_for_genre
 
 import argparse
@@ -26,6 +26,17 @@ def add_to_buckets(buckets: dict(), bucket_id: int, tensor: np.ndarray, added_fe
     X_added.append(added_features)
     Y.append(labels)
 
+# Given column vector of feature for line i, produce matrix indicating features in lines i-1, i, i+1
+# note this is slightly bugged at first and last line
+def window_features(feat_vector: np.ndarray) -> np.ndarray:
+    return np.concatenate(
+               (
+               np.roll(feat_vector, -1, axis = 0),
+               feat_vector,
+               np.roll(feat_vector, +1, axis = 0)
+               ),
+               axis = 1
+    )
 
 def main(args):
     print("Starting training with parameters:", vars(args))
@@ -42,17 +53,24 @@ def main(args):
     print("Found", channels, "SSM channels")
 
     segment_borders = load_segment_borders(args.data)
-    token_count_feat = load_linewise_feature(args.data, 'token_count')
+
+    # ADDITIONAL FEATURES FOR AFTER CONVOLUTION
+    # token_count_feat = load_linewise_feature(args.data, 'token_count')
+    # token_count_feat.set_index(['id'], inplace=True)
+    # syllable_count_feat = load_linewise_feature(args.data, 'syllable_count')
+    # syllable_count_feat.set_index(['id'], inplace=True)
+    char_count_feat = load_linewise_feature(args.data, 'char_count')
+    char_count_feat.set_index(['id'], inplace=True)
 
     if not args.genre:
-        train_borders, dev_borders, test_borders = load_segment_borders_watanabe(args.data)
+        train_borders, test_borders = load_segment_borders_watanabe(args.data)
     else:
-        # load dev/test for some genre only (training is always on whole Watanabe train set)
-        train_borders, dev_borders, test_borders = load_segment_borders_for_genre(args.data, args.genre)
+        # load train/test for some genre only (training is always on whole Watanabe train set)
+        train_borders, test_borders = load_segment_borders_for_genre(args.data, args.genre)
 
     train_borders_set = set(train_borders.id)
-    dev_borders_set = set(dev_borders.id)
-    train_dev_borders_set = train_borders_set.union(dev_borders_set)
+    test_borders_set = set(test_borders.id)
+    train_test_borders_set = train_borders_set.union(test_borders_set)
     print("Done in %.1fs" % tdiff(timestamp))
 
     # Figure out the maximum ssm size
@@ -63,7 +81,7 @@ def main(args):
     for ssm_obj in multiple_ssms_data[0].itertuples():
         current_id = ssm_obj.id
         #skip ids not in training or dev
-        if not current_id in train_dev_borders_set:
+        if not current_id in train_test_borders_set:
             continue
 
         counter += 1
@@ -82,7 +100,7 @@ def main(args):
     #allow indexed access to dataframes
     for elem in multiple_ssms_data:
         elem.set_index(['id'], inplace=True)
-    token_count_feat.set_index(['id'], inplace=True)
+
 
     for borders_obj in segment_borders.itertuples():
         counter += 1
@@ -93,8 +111,8 @@ def main(args):
 
         current_id = borders_obj.id
 
-        #skip ids not in training or dev
-        if not current_id in train_dev_borders_set:
+        #skip ids not in training or test
+        if not current_id in train_test_borders_set:
             continue
 
         ssm_elems = []
@@ -122,7 +140,14 @@ def main(args):
         # one tensor for one song
         ssm_tensor = tensor_from_multiple_ssms(ssm_elems, 2**bucket_id, args.window_size)
         # concatenate all added features at axis=1 here
-        added_features = token_count_feat.loc[current_id].feat_val
+        added_features = np.concatenate(
+                             (
+                             #window_features(token_count_feat.loc[current_id].feat_val),
+                             #window_features(syllable_count_feat.loc[current_id].feat_val),
+                             window_features(char_count_feat.loc[current_id].feat_val),
+                             ),
+                             axis = 1
+                        )
         added_feats_count = added_features.shape[1]
 
         ssm_labels = labels_from_label_array(borders_obj.borders, ssm_size)
@@ -131,18 +156,17 @@ def main(args):
         if current_id in train_borders_set:
             add_to_buckets(train_buckets, bucket_id, ssm_tensor, added_features, ssm_labels)
         else:
-            assert current_id in dev_borders_set, 'id ' + current_id + ' is neither in train nor in dev!'
+            assert current_id in test_borders_set, 'id ' + current_id + ' is neither in train nor in test!'
             add_to_buckets(test_buckets, bucket_id, ssm_tensor, added_features, ssm_labels)
 
     del multiple_ssms_data
     del added_features
     del segment_borders
     del train_borders
-    del dev_borders
     del test_borders
     del train_borders_set
-    del dev_borders_set
-    del train_dev_borders_set
+    del test_borders_set
+    del train_test_borders_set
 
     # Compacting buckets and printing statistics
     print("Training set buckets:")
@@ -189,6 +213,10 @@ def main(args):
         global_step_v = 0
         avg_loss = 0.0
 
+        eval_precisions = []
+        eval_recalls = []
+        eval_fscores = []
+
         # Training loop
         for epoch in range(args.max_epoch):
             for bucket_id in train_buckets:
@@ -206,8 +234,8 @@ def main(args):
                     # Reporting
                     if global_step_v % args.report_period == 0:
                         print("Iter %d" % global_step_v)
-                        print("  epoch %.0f, avg.loss %.4f, iter/s %.4fs" % (
-                            epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
+                        print("  epoch: %.0f, avg.loss: %.4f, iter/s: %.4f" % (
+                            epoch, avg_loss / args.report_period, args.report_period / tdiff(timestamp)
                         ))
                         timestamp = time()
                         avg_loss = 0.0
@@ -233,17 +261,36 @@ def main(args):
                                     print(e)
                                     print(confusion_matrix(true_Y, pred_Y).ravel())
                                     print(confusion_matrix(true_Y, pred_Y))
+
+                        current_precision = precision(tp, fp) * 100
+                        current_recall = recall(tp, fn) * 100
+                        current_fscore = f1(tp, fp, fn) * 100
+                        eval_precisions.append(current_precision)
+                        eval_recalls.append(current_recall)
+                        eval_fscores.append(current_fscore)
                         print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%" % (
-                            precision(tp, fp) * 100, recall(tp, fn) * 100, f1(tp, fp, fn) * 100
+                            current_precision, current_recall, current_fscore
                         ))
 
                     # Checkpointing
                     if global_step_v % 10000 == 0:
                         real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
                         print("Saved the checkpoint to: %s" % real_save_path)
+                        print('precisions:', eval_precisions)
+                        print('recalls:', eval_recalls)
+                        print('fscores:', eval_fscores)
 
         real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
         print("Saved the checkpoint to: %s" % real_save_path)
+        print('total precisions:', eval_precisions)
+        print('total recalls:', eval_recalls)
+        print('total fscores:', eval_fscores)
+        print('--------------')
+        n = 10
+        print('n =',n)
+        print('avg. of last n precisions:', np.round(np.median(eval_precisions[-n:]), 1), '+-', np.round(np.std(eval_precisions[-n:]), 1), '%')
+        print('avg. of last n recalls   :', np.round(np.median(eval_recalls[-n:]), 1), '+-', np.round(np.std(eval_recalls[-n:]), 1), '%')
+        print('avg. of last n fscores   :', np.round(np.median(eval_fscores[-n:]), 1), '+-', np.round(np.std(eval_fscores[-n:]), 1), '%')
 
 
 if __name__ == '__main__':

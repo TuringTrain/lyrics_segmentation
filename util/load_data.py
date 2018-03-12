@@ -30,6 +30,17 @@ def load_ssm_phonetics(data_path: str) -> pd.DataFrame:
         sppm = store['mdb_127_en_phonetics_1'].append(store['mdb_127_en_phonetics_2'])
     return sppm
 
+def load_ssm_lex_struct_watanabe(data_path: str) -> pd.DataFrame:
+    base_name = 'ssm_store_lex_struct_watanabe_'
+    table_name = 'ssm_lex_struct'
+    with pd.HDFStore(path.join(data_path, base_name + str(1) + '.hdf')) as store:
+        sssm = store[table_name]
+    for i in [x+2 for x in range(9)]:
+        with pd.HDFStore(path.join(data_path, base_name + str(i) + '.hdf')) as store:
+            print('appending', data_path, base_name + str(i) + '.hdf')
+            sssm = sssm.append(store[table_name])
+    return sssm
+
 # load some ssms by their names. Requires them to be in one piece
 def load_ssms_from(data_path: str, df_names: list) -> pd.DataFrame:
     with pd.HDFStore(path.join(data_path, 'ssm_store_pub1.hdf')) as store:
@@ -42,18 +53,16 @@ def load_ssms_from(data_path: str, df_names: list) -> pd.DataFrame:
 # train and test on all genres
 def load_segment_borders_watanabe(data_path: str) -> pd.DataFrame:
     with pd.HDFStore(path.join(data_path, 'borders_pub2.hdf')) as store:
-        train_borders = store['watanabe_train']
-        dev_borders = store['watanabe_dev']
+        train_borders = store['watanabe_train'].append(store['watanabe_dev'])
         test_borders = store['watanabe_test']
-    return train_borders, dev_borders, test_borders
+    return train_borders, test_borders
 
 # train on all genres, test on single genre
 def load_segment_borders_for_genre(data_path: str, genre_name: str) -> pd.DataFrame:
     with pd.HDFStore(path.join(data_path, 'borders_pub2.hdf')) as store:
-        train_borders = store['watanabe_train']
-        dev_borders = store[genre_name + '_watanabe_dev']
+        train_borders = store['watanabe_train'].append(store['watanabe_dev'])
         test_borders = store[genre_name + '_watanabe_test']
-    return train_borders, dev_borders, test_borders
+    return train_borders, test_borders
 
 ################ current genres and song counts ###########
 # /AlternativeRock_watanabe_dev  ->  855

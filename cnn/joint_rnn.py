@@ -47,7 +47,7 @@ class JointRNN(NoPadding1Conv):
 
         # Second convolutional layer - performs horizontal convolutions
         with tf.name_scope('conv2'):
-            features_conv2 = 256
+            features_conv2 = 128
             W_conv2 = self.weight_variable([1, window_size, features_conv1, features_conv2])
             b_conv2 = self.bias_variable([features_conv2])
             h_conv2 = tf.nn.conv2d(h_pool1_drop, W_conv2, strides=[1, 1, 1, 1], padding='VALID')
