@@ -111,3 +111,19 @@ def f1(tp: int, fp: int, fn: int) -> float:
     prec = precision(tp, fp)
     rec = recall(tp, fn)
     return 2 * prec * rec / (prec + rec)
+
+
+def windowdiff(seg1, seg2, k, boundary=1):
+    """
+    Compute the windowdiff score for a pair of segmentations.  A segmentation is any sequence
+    over a vocabulary of two items (e.g. 0, 1, where the specified boundary value is used
+    to mark the edge of a segmentation.
+    """
+
+    assert len(seg1) == len(seg2), "Segments have unequal length: %d and %d" % (len(seg1), len(seg2))
+    assert k < len(seg1), "k (%d) can't be larger than a segment length (%d)" % (k, len(seg1))
+
+    wd = 0
+    for i in range(len(seg1) - k):
+        wd += abs(np.count_nonzero(seg1[i:i+k+1] == boundary) - np.count_nonzero(seg2[i:i+k+1] == boundary))
+    return wd / (len(seg1) - k)
