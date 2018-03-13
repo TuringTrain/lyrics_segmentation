@@ -14,7 +14,8 @@ class JointRNN(NoPadding1Conv):
         #   batch_size x max_ssm_size
         # Note that we do not fix the first dimension to allow flexible batch_size for evaluation / leftover samples
         with tf.name_scope('input'):
-            self.g_in = tf.placeholder(tf.float32, shape=[None, ssm_size, 2*window_size, ssm_size, channels], name="input")
+            self.g_in = tf.placeholder(tf.float32, shape=[None, ssm_size, 2 * window_size, ssm_size, channels],
+                                       name="input")
             self.g_lengths = tf.placeholder(tf.int32, shape=[None], name="lengths")
             self.g_labels = tf.placeholder(tf.int32, shape=[None, ssm_size], name="labels")
             self.g_dprob = tf.placeholder(tf.float32, name="dropout_prob")
@@ -25,16 +26,16 @@ class JointRNN(NoPadding1Conv):
         with tf.name_scope('reshape'):
             # x_image = tf.expand_dims(self.g_in, -1)
             #   no reshaping necessary as incoming tensor has number of channels as lowest rank
-            x_image = tf.reshape(self.g_in, [-1, 2*window_size, ssm_size, channels], name="conv-reshaping")
-            #x_image = self.g_in
+            x_image = tf.reshape(self.g_in, [-1, 2 * window_size, ssm_size, channels], name="conv-reshaping")
+            # x_image = self.g_in
 
         # First convolutional layer - 2d convolutions with windows always capturing the borders
         with tf.name_scope('conv1'):
             features_conv1 = 128
-            W_conv1 = self.weight_variable([window_size+1, window_size+1, channels, features_conv1])
+            W_conv1 = self.weight_variable([window_size + 1, window_size + 1, channels, features_conv1])
             b_conv1 = self.bias_variable([features_conv1])
             h_conv1 = tf.nn.conv2d(x_image, W_conv1, strides=[1, 1, 1, 1], padding='VALID')
-            h_conv1 = tf.nn.relu(h_conv1 + b_conv1)
+            h_conv1 = tf.nn.tanh(h_conv1 + b_conv1)
 
         # Pooling layer - downsamples by window_size.
         with tf.name_scope('pool1'):
@@ -43,7 +44,7 @@ class JointRNN(NoPadding1Conv):
 
         # Dropout - controls the complexity of the model, prevents co-adaptation of features
         with tf.name_scope('conv1-dropout'):
-            h_pool1_drop = tf.nn.dropout(h_pool1, 1.0-(1.0-self.g_dprob)/2)
+            h_pool1_drop = tf.nn.dropout(h_pool1, self.g_dprob)
 
         # Second convolutional layer - performs horizontal convolutions
         with tf.name_scope('conv2'):
@@ -51,7 +52,7 @@ class JointRNN(NoPadding1Conv):
             W_conv2 = self.weight_variable([1, window_size, features_conv1, features_conv2])
             b_conv2 = self.bias_variable([features_conv2])
             h_conv2 = tf.nn.conv2d(h_pool1_drop, W_conv2, strides=[1, 1, 1, 1], padding='VALID')
-            h_conv2 = tf.nn.relu(h_conv2 + b_conv2)
+            h_conv2 = tf.nn.tanh(h_conv2 + b_conv2)
 
         # Pooling layer - downsamples to a pixel.
         with tf.name_scope('pool2'):
@@ -59,11 +60,14 @@ class JointRNN(NoPadding1Conv):
             h_pool2 = tf.nn.max_pool(h_conv2, ksize=[1, 1, pool_size, 1],
                                      strides=[1, 1, pool_size, 1], padding='VALID')
 
+        with tf.name_scope('conv2-dropout'):
+            h_pool2_drop = tf.nn.dropout(h_pool2, self.g_dprob)
+
         # We have to either fix the ssm_size or do an average here
         fc_input_size = features_conv2
         fc_size = 512
-        fc_input = tf.reshape(h_pool2, [-1, ssm_size, features_conv2])
-        #for fc_id in range(3):
+        fc_input = tf.reshape(h_pool2_drop, [-1, ssm_size, features_conv2])
+        # for fc_id in range(3):
         #    with tf.name_scope('fc-%d' % fc_id):
         #        W_fc = self.weight_variable([fc_input_size, fc_size])
         #        b_fc = self.bias_variable([fc_size])
@@ -74,7 +78,7 @@ class JointRNN(NoPadding1Conv):
 
         # Defining cell and initialising RSDAE
         with tf.variable_scope("forward-cell", initializer=tf.orthogonal_initializer()):
-            lstm_size = 50
+            lstm_size = 100
             cell = tf.nn.rnn_cell.BasicLSTMCell(lstm_size)
             cell = tf.contrib.rnn.DropoutWrapper(
                 cell, output_keep_prob=self.g_dprob)
@@ -94,6 +98,14 @@ class JointRNN(NoPadding1Conv):
         losses_mask = tf.sequence_mask(
             lengths=self.g_lengths, maxlen=ssm_size,
             dtype=tf.float32)
+
+        def tile_column_wise(tensor, target):
+            with tf.name_scope("tile_column_wise"):
+                return tf.tile(tf.reshape(tensor, [-1, 1]), [1, target])
+
+        float_labels = tf.to_float(self.g_labels)
+        losses_mask += (0.5 * float_labels * tile_column_wise(tf.to_float(self.g_lengths), ssm_size)) \
+                       / tile_column_wise(tf.reduce_sum(float_labels, axis=1), ssm_size)
         loss = tf.contrib.seq2seq.sequence_loss(
             self.g_out,
             self.g_labels,

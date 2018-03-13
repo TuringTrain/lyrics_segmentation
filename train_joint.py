@@ -5,9 +5,9 @@ from cnn.joint_rnn import JointRNN
 from cnn.mnist_like import MnistLike
 from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_multiple_ssms, labels_from_label_array
-from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets, feed_joint
+from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets, feed_joint, windowdiff
 
-from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature
+from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature, load_ssm_lex_struct_watanabe
 from util.load_data import load_segment_borders, load_segment_borders_watanabe, load_segment_borders_for_genre
 
 import argparse
@@ -39,7 +39,8 @@ def main(args):
 
     # load different aligned SSMs
     multiple_ssms_data = [load_ssm_string(args.data),
-                          #load_ssm_phonetics(args.data),
+                          load_ssm_phonetics(args.data),
+                          load_ssm_lex_struct_watanabe(args.data)
                           ]
     channels = len(multiple_ssms_data)
     print("Found", channels, "SSM channels")
@@ -196,84 +197,108 @@ def main(args):
             eval_fscores = []
 
             # Training loop
-            for epoch in range(args.max_epoch):
-                for bucket_id in train_buckets:
-                    for batch_X, batch_X_lengths, batch_Y in feed_joint(train_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size):
-                        # Single training step
-                        summary_v, global_step_v, loss_v, _ = sess.run(
-                            fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
-                            feed_dict={nn.g_in: batch_X,
-                                       nn.g_labels: batch_Y,
-                                       nn.g_dprob: 0.6,
-                                       nn.g_lengths: batch_X_lengths})
-                        summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
-                        avg_loss += loss_v
+            try:
+                for epoch in range(args.max_epoch):
+                    for bucket_id in train_buckets:
+                        for batch_X, batch_X_lengths, batch_Y in feed_joint(train_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size):
+                            # Single training step
+                            summary_v, global_step_v, loss_v, _ = sess.run(
+                                fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
+                                feed_dict={nn.g_in: batch_X,
+                                           nn.g_labels: batch_Y,
+                                           nn.g_dprob: 0.6,
+                                           nn.g_lengths: batch_X_lengths})
+                            summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
+                            avg_loss += loss_v
 
-                        # Reporting
-                        if global_step_v % args.report_period == 0:
-                            print("Iter %d" % global_step_v)
-                            print("  epoch %.0f, avg.loss %.4f, iter/s %.4fs" % (
-                                epoch, avg_loss / args.report_period, tdiff(timestamp) / args.report_period
-                            ))
-                            timestamp = time()
-                            avg_loss = 0.0
+                            # Reporting
+                            if global_step_v % args.report_period == 0:
+                                avg_loss /= args.report_period
+                                print("Iter %d, epoch %.0f, avg.loss %.4f, iter/s %.4fs" % (
+                                    global_step_v, epoch, avg_loss, tdiff(timestamp) / args.report_period
+                                ))
+                                timestamp = time()
+                                avg_loss = 0.0
 
-                        # Evaluation
-                        if global_step_v % (args.report_period*10) == 0:
-                            tp = 0
-                            fp = 0
-                            fn = 0
-                            for bucket_id in test_buckets:
-                                for test_X, test_X_lengths, true_Y in feed_joint(test_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size):
-                                    # batch_size x max_len x 2
-                                    pred_Y = nn.g_out.eval(feed_dict={
-                                        nn.g_in: test_X,
-                                        nn.g_dprob: 1.0,
-                                        nn.g_lengths: test_X_lengths
-                                    })
-                                    for i in range(pred_Y.shape[0]):
-                                        pred_sample_Y = np.argmax(pred_Y[i, :test_X_lengths[i], :], axis=1)
-                                        true_sample_Y = true_Y[i, :test_X_lengths[i]]
-                                        try:
-                                            _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_sample_Y, pred_sample_Y).ravel()
-                                            tp += cur_tp
-                                            fp += cur_fp
-                                            fn += cur_fn
-                                        except Exception as e:
-                                            print(e)
-                                            print(confusion_matrix(true_Y, pred_Y).ravel())
-                                            print(confusion_matrix(true_Y, pred_Y))
+                            # Evaluation
+                            if global_step_v % (args.report_period*10) == 0:
+                                for bucket_id in test_buckets:
+                                    cur_p, cur_r, cur_f1, wd = do_eval(nn, feed_joint(test_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size), args.output)
+                                    eval_precisions.append(cur_p)
+                                    eval_recalls.append(cur_r)
+                                    eval_fscores.append(cur_f1)
+                                    print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f" % (
+                                        cur_p, cur_r, cur_f1, wd
+                                    ))
+                                timestamp = time()
 
-                            current_precision = precision(tp, fp) * 100
-                            current_recall = recall(tp, fn) * 100
-                            current_fscore = f1(tp, fp, fn) * 100
-                            eval_precisions.append(current_precision)
-                            eval_recalls.append(current_recall)
-                            eval_fscores.append(current_fscore)
-                            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%" % (
-                                current_precision, current_recall, current_fscore
-                            ))
-
-                        # Checkpointing
-                        if global_step_v % 1000 == 0:
-                            real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
-                            print("Saved the checkpoint to: %s" % real_save_path)
-                            print('precisions:', eval_precisions)
-                            print('recalls:', eval_recalls)
-                            print('fscores:', eval_fscores)
-
+                            # Checkpointing
+                            if global_step_v % (args.report_period*10) == 0:
+                                real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
+                                print("Saved the checkpoint to: %s" % real_save_path)
+                                print('precisions:', eval_precisions)
+                                print('recalls:', eval_recalls)
+                                print('fscores:', eval_fscores)
+            except Exception as e:
+                print(e)
 
             real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
+            for bucket_id in test_buckets:
+                cur_p, cur_r, cur_f1, wd = do_eval(nn, feed_joint(test_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size), args.output)
+                print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f" % (
+                    cur_p, cur_r, cur_f1, wd
+                ))
             print("Saved the checkpoint to: %s" % real_save_path)
             print('total precisions:', eval_precisions)
             print('total recalls:', eval_recalls)
             print('total fscores:', eval_fscores)
             print('--------------')
             n = 10
-            print('n =',n)
+            print('n =', n)
             print('avg. of last n precisions:', np.round(np.median(eval_precisions[-n:]), 1), '+-', np.round(np.std(eval_precisions[-n:]), 1), '%')
             print('avg. of last n recalls   :', np.round(np.median(eval_recalls[-n:]), 1), '+-', np.round(np.std(eval_recalls[-n:]), 1), '%')
             print('avg. of last n fscores   :', np.round(np.median(eval_fscores[-n:]), 1), '+-', np.round(np.std(eval_fscores[-n:]), 1), '%')
+
+
+def do_eval(model, generator, output):
+    tp = 0
+    fp = 0
+    fn = 0
+    wd = 0
+    wd_count = 0
+    with open(path.join(output, 'eval.txt'), 'w') as writer:
+        for test_X, test_X_lengths, true_Y in generator:
+            # batch_size x max_len x 2
+            pred_Y = model.g_out.eval(feed_dict={
+                model.g_in: test_X,
+                model.g_dprob: 1.0,
+                model.g_lengths: test_X_lengths
+            })
+            for i in range(pred_Y.shape[0]):
+                writer.write("========\n")
+                pred_sample_Y = np.argmax(pred_Y[i, :test_X_lengths[i], :], axis=1)
+                true_sample_Y = true_Y[i, :test_X_lengths[i]]
+                for i in range(true_sample_Y.shape[0]):
+                    writer.write("%d\t%d\n" % (true_sample_Y[i], pred_sample_Y[i]))
+                try:
+                    _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_sample_Y, pred_sample_Y).ravel()
+                    tp += cur_tp
+                    fp += cur_fp
+                    fn += cur_fn
+                    wd += windowdiff(true_sample_Y, pred_sample_Y)
+                    wd_count += 1
+                except Exception as e:
+                    print(e)
+                    print(confusion_matrix(true_Y, pred_Y).ravel())
+                    print(confusion_matrix(true_Y, pred_Y))
+        writer.write("========\n")
+
+    current_precision = precision(tp, fp) * 100
+    current_recall = recall(tp, fn) * 100
+    current_f1 = f1(tp, fp, fn) * 100
+    wd /= wd_count
+
+    return current_precision, current_recall, current_f1, wd
 
 
 if __name__ == '__main__':

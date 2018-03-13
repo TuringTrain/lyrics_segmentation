@@ -14,10 +14,12 @@ def load_segment_borders(data_path: str) -> pd.DataFrame:
         borders = store['mdb_127_en_seg5p']
     return borders
 
+
 def load_linewise_feature(data_path:str, feat_name:str) -> pd.DataFrame:
     with pd.HDFStore(path.join(data_path, 'linewise_feats_watanabe.hdf')) as store:
         linewise = store[feat_name]
     return linewise
+
 
 def load_ssm_string(data_path: str) -> pd.DataFrame:
     with pd.HDFStore(path.join(data_path, 'ssm_store_pub1.hdf')) as store:
@@ -30,6 +32,7 @@ def load_ssm_phonetics(data_path: str) -> pd.DataFrame:
         sppm = store['mdb_127_en_phonetics_1'].append(store['mdb_127_en_phonetics_2'])
     return sppm
 
+
 def load_ssm_lex_struct_watanabe(data_path: str) -> pd.DataFrame:
     base_name = 'ssm_store_lex_struct_watanabe_'
     table_name = 'ssm_lex_struct'
@@ -40,6 +43,7 @@ def load_ssm_lex_struct_watanabe(data_path: str) -> pd.DataFrame:
             print('appending', data_path, base_name + str(i) + '.hdf')
             sssm = sssm.append(store[table_name])
     return sssm
+
 
 # load some ssms by their names. Requires them to be in one piece
 def load_ssms_from(data_path: str, df_names: list) -> pd.DataFrame:
@@ -56,6 +60,7 @@ def load_segment_borders_watanabe(data_path: str) -> pd.DataFrame:
         train_borders = store['watanabe_train'].append(store['watanabe_dev'])
         test_borders = store['watanabe_test']
     return train_borders, test_borders
+
 
 # train on all genres, test on single genre
 def load_segment_borders_for_genre(data_path: str, genre_name: str) -> pd.DataFrame:
