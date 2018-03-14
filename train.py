@@ -2,7 +2,7 @@ from cnn.dense import Dense
 from cnn.mnist_like import MnistLike
 from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_multiple_ssms, labels_from_label_array
-from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets
+from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets, windowdiff
 
 from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature, load_ssm_lex_struct_watanabe
 from util.load_data import load_segment_borders, load_segment_borders_watanabe, load_segment_borders_for_genre
@@ -169,10 +169,10 @@ def main(args):
     del train_test_borders_set
 
     # Compacting buckets and printing statistics
-    print("Training set buckets:")
-    train_buckets = compact_buckets(train_buckets)
-    print("Test set buckets:")
-    test_buckets = compact_buckets(test_buckets)
+    #print("Training set buckets:")
+    #train_buckets = compact_buckets(train_buckets)
+    #print("Test set buckets:")
+    #test_buckets = compact_buckets(test_buckets)
 
     # Define the neural network
     # nn = Dense(window_size=args.window_size, ssm_size=2 ** next(train_buckets.keys().__iter__()))
@@ -233,64 +233,81 @@ def main(args):
 
                     # Reporting
                     if global_step_v % args.report_period == 0:
-                        print("Iter %d" % global_step_v)
-                        print("  epoch: %.0f, avg.loss: %.4f, iter/s: %.4f" % (
-                            epoch, avg_loss / args.report_period, args.report_period / tdiff(timestamp)
+                        avg_loss /= args.report_period
+                        print("Iter %d, epoch %.0f, avg.loss %.4f, iter/s %.4fs" % (
+                            global_step_v, epoch, avg_loss, tdiff(timestamp) / args.report_period
                         ))
                         timestamp = time()
                         avg_loss = 0.0
 
                     # Evaluation
                     if global_step_v % (args.report_period*10) == 0:
-                        tp = 0
-                        fp = 0
-                        fn = 0
+                        timestamp = time()
                         for bucket_id in test_buckets:
-                            for test_X, text_X_added_feats, true_Y in feed(test_buckets[bucket_id], args.batch_size):
-                                pred_Y = nn.g_results.eval(feed_dict={
-                                    nn.g_in: test_X,
-                                    nn.g_dprob: 1.0,
-                                    nn.g_added_features: text_X_added_feats
-                                })
-                                try:
-                                    _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_Y, pred_Y).ravel()
-                                    tp += cur_tp
-                                    fp += cur_fp
-                                    fn += cur_fn
-                                except Exception as e:
-                                    print(e)
-                                    print(confusion_matrix(true_Y, pred_Y).ravel())
-                                    print(confusion_matrix(true_Y, pred_Y))
-
-                        current_precision = precision(tp, fp) * 100
-                        current_recall = recall(tp, fn) * 100
-                        current_fscore = f1(tp, fp, fn) * 100
-                        eval_precisions.append(current_precision)
-                        eval_recalls.append(current_recall)
-                        eval_fscores.append(current_fscore)
-                        print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%" % (
-                            current_precision, current_recall, current_fscore
-                        ))
+                            cur_p, cur_r, cur_f1, wd = do_eval(nn, feed(test_buckets[bucket_id], 1), args.output)
+                            eval_precisions.append(cur_p)
+                            eval_recalls.append(cur_r)
+                            eval_fscores.append(cur_f1)
+                            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
+                                cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
+                            ))
+                            print('precisions:', eval_precisions)
+                            print('recalls:', eval_recalls)
+                            print('fscores:', eval_fscores)
+                        timestamp = time()
 
                     # Checkpointing
                     if global_step_v % 10000 == 0:
                         real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
                         print("Saved the checkpoint to: %s" % real_save_path)
-                        print('precisions:', eval_precisions)
-                        print('recalls:', eval_recalls)
-                        print('fscores:', eval_fscores)
 
         real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
         print("Saved the checkpoint to: %s" % real_save_path)
+        for bucket_id in test_buckets:
+            timestamp = time()
+            cur_p, cur_r, cur_f1, wd = do_eval(nn, feed(test_buckets[bucket_id], 1), args.output)
+            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
+                cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
+            ))
         print('total precisions:', eval_precisions)
         print('total recalls:', eval_recalls)
         print('total fscores:', eval_fscores)
-        print('--------------')
-        n = 10
-        print('n =',n)
-        print('avg. of last n precisions:', np.round(np.median(eval_precisions[-n:]), 1), '+-', np.round(np.std(eval_precisions[-n:]), 1), '%')
-        print('avg. of last n recalls   :', np.round(np.median(eval_recalls[-n:]), 1), '+-', np.round(np.std(eval_recalls[-n:]), 1), '%')
-        print('avg. of last n fscores   :', np.round(np.median(eval_fscores[-n:]), 1), '+-', np.round(np.std(eval_fscores[-n:]), 1), '%')
+
+
+def do_eval(model, generator, output):
+    tp = 0
+    fp = 0
+    fn = 0
+    wd = 0
+    wd_count = 0
+    with open(path.join(output, 'eval.txt'), 'w') as writer:
+        for test_X, text_X_added_feats, true_Y in generator:
+            # batch_size x max_len x 2
+            pred_Y = model.g_results.eval(feed_dict={
+                model.g_in: test_X,
+                model.g_dprob: 1.0,
+                model.g_added_features: text_X_added_feats
+            })
+            writer.write("==========\n")
+            for i in range(true_Y.shape[0]):
+                writer.write("%d\t%d\n" % (true_Y[i], pred_Y[i]))
+            try:
+                _, cur_fp, cur_fn, cur_tp = confusion_matrix(true_Y, pred_Y).ravel()
+                tp += cur_tp
+                fp += cur_fp
+                fn += cur_fn
+                wd += windowdiff(true_Y, pred_Y)
+                wd_count += 1
+            except Exception as e:
+                print(e)
+        writer.write("==========\n")
+
+    current_precision = precision(tp, fp) * 100
+    current_recall = recall(tp, fn) * 100
+    current_f1 = f1(tp, fp, fn) * 100
+    wd /= wd_count
+
+    return current_precision, current_recall, current_f1, wd
 
 
 if __name__ == '__main__':

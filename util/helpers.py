@@ -76,13 +76,13 @@ def feed(data: (np.ndarray, np.ndarray, np.ndarray), batch_size: int) -> (np.nda
     """
     X, X_added, Y = data
     X, X_added, Y = shuffle(X, X_added, Y)
-    size = Y.shape[0]
+    size = len(Y)
 
     pointer = 0
     while pointer+batch_size < size:
-        yield X[pointer:pointer+batch_size], X_added[pointer:pointer+batch_size], Y[pointer:pointer+batch_size]
+        yield np.concatenate(X[pointer:pointer+batch_size]), np.concatenate(X_added[pointer:pointer+batch_size]), np.concatenate(Y[pointer:pointer+batch_size])
         pointer += batch_size
-    yield X[pointer:], X_added[pointer:], Y[pointer:]
+    yield np.concatenate(X[pointer:]), np.concatenate(X_added[pointer:]), np.concatenate(Y[pointer:])
 
 
 def tdiff(timestamp: float) -> float:

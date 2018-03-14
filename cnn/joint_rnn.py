@@ -35,7 +35,7 @@ class JointRNN(NoPadding1Conv):
             W_conv1 = self.weight_variable([window_size + 1, window_size + 1, channels, features_conv1])
             b_conv1 = self.bias_variable([features_conv1])
             h_conv1 = tf.nn.conv2d(x_image, W_conv1, strides=[1, 1, 1, 1], padding='VALID')
-            h_conv1 = tf.nn.tanh(h_conv1 + b_conv1)
+            h_conv1 = tf.nn.relu(h_conv1 + b_conv1)
 
         # Pooling layer - downsamples by window_size.
         with tf.name_scope('pool1'):
@@ -52,7 +52,7 @@ class JointRNN(NoPadding1Conv):
             W_conv2 = self.weight_variable([1, window_size, features_conv1, features_conv2])
             b_conv2 = self.bias_variable([features_conv2])
             h_conv2 = tf.nn.conv2d(h_pool1_drop, W_conv2, strides=[1, 1, 1, 1], padding='VALID')
-            h_conv2 = tf.nn.tanh(h_conv2 + b_conv2)
+            h_conv2 = tf.nn.relu(h_conv2 + b_conv2)
 
         # Pooling layer - downsamples to a pixel.
         with tf.name_scope('pool2'):
@@ -78,7 +78,7 @@ class JointRNN(NoPadding1Conv):
 
         # Defining cell and initialising RSDAE
         with tf.variable_scope("forward-cell", initializer=tf.orthogonal_initializer()):
-            lstm_size = 100
+            lstm_size = 25
             cell = tf.nn.rnn_cell.BasicLSTMCell(lstm_size)
             cell = tf.contrib.rnn.DropoutWrapper(
                 cell, output_keep_prob=self.g_dprob)
@@ -104,7 +104,7 @@ class JointRNN(NoPadding1Conv):
                 return tf.tile(tf.reshape(tensor, [-1, 1]), [1, target])
 
         float_labels = tf.to_float(self.g_labels)
-        losses_mask += (0.5 * float_labels * tile_column_wise(tf.to_float(self.g_lengths), ssm_size)) \
+        losses_mask += (0.1 * float_labels * tile_column_wise(tf.to_float(self.g_lengths), ssm_size)) \
                        / tile_column_wise(tf.reduce_sum(float_labels, axis=1), ssm_size)
         loss = tf.contrib.seq2seq.sequence_loss(
             self.g_out,
