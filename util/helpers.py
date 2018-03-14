@@ -30,7 +30,7 @@ def compact_buckets(buckets: dict()) -> dict():
     return buckets
 
 
-def feed_joint(data: (np.ndarray, np.ndarray), ssm_size: int, batch_size: int) -> (np.ndarray, np.ndarray, np.ndarray):
+def feed_joint(data: (np.ndarray, np.ndarray), ssm_size: int, batch_size: int, enable_shuffle=True) -> (np.ndarray, np.ndarray, np.ndarray):
     """
     Produce random batches of data from the dataset
 
@@ -39,7 +39,8 @@ def feed_joint(data: (np.ndarray, np.ndarray), ssm_size: int, batch_size: int) -
     :return: batch
     """
     X, _, Y = data
-    X, Y = shuffle(X, Y)
+    if enable_shuffle:
+        X, Y = shuffle(X, Y)
     size = len(Y)
 
     def put(X_batch, X_lengths, Y_batch, i, X, Y):
@@ -66,7 +67,7 @@ def feed_joint(data: (np.ndarray, np.ndarray), ssm_size: int, batch_size: int) -
         pointer += batch_size
 
 
-def feed(data: (np.ndarray, np.ndarray, np.ndarray), batch_size: int) -> (np.ndarray, np.ndarray, np.ndarray):
+def feed(data: (np.ndarray, np.ndarray, np.ndarray), batch_size: int, enable_shuffle=True) -> (np.ndarray, np.ndarray, np.ndarray):
     """
     Produce random batches of data from the dataset
 
@@ -75,7 +76,8 @@ def feed(data: (np.ndarray, np.ndarray, np.ndarray), batch_size: int) -> (np.nda
     :return: batch
     """
     X, X_added, Y = data
-    X, X_added, Y = shuffle(X, X_added, Y)
+    if enable_shuffle:
+        X, X_added, Y = shuffle(X, X_added, Y)
     size = len(Y)
 
     pointer = 0

@@ -1,5 +1,4 @@
 from cnn.joint_rnn import JointRNN
-from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_multiple_ssms, labels_from_label_array
 from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets, feed_joint, windowdiff
 
@@ -25,7 +24,7 @@ def add_to_buckets(buckets: dict(), bucket_id: int, tensor: np.ndarray, added_fe
     Y.append(labels)
 
 
-def main(args):
+def main(args, output, multiple_ssms_data):
     print("Starting training with parameters:", vars(args))
 
     # Load the data
@@ -33,10 +32,6 @@ def main(args):
     timestamp = time()
 
     # load different aligned SSMs
-    multiple_ssms_data = [#load_ssm_string(args.data),
-                          #load_ssm_phonetics(args.data),
-                          load_ssm_lex_struct_watanabe(args.data)
-                          ]
     channels = len(multiple_ssms_data)
     print("Found", channels, "SSM channels")
 
@@ -60,7 +55,7 @@ def main(args):
     max_ssm_size = 0
     counter = 0
     for ssm_obj in multiple_ssms_data[0].itertuples():
-        current_id = ssm_obj.id
+        current_id = ssm_obj.Index
         # skip ids not in training or dev
         if not current_id in train_dev_borders_set:
             continue
@@ -78,9 +73,6 @@ def main(args):
     timestamp = time()
     max_ssm_size = min(max_ssm_size, args.max_ssm_size)
 
-    # allow indexed access to dataframes
-    for elem in multiple_ssms_data:
-        elem.set_index(['id'], inplace=True)
     token_count_feat.set_index(['id'], inplace=True)
 
     for borders_obj in segment_borders.itertuples():
@@ -133,7 +125,6 @@ def main(args):
             assert current_id in test_borders_set, 'id ' + current_id + ' is neither in train nor in dev!'
             add_to_buckets(test_buckets, bucket_id, ssm_tensor, added_features, ssm_labels)
 
-    del multiple_ssms_data
     del added_features
     del segment_borders
     del train_borders
@@ -159,96 +150,99 @@ def main(args):
 
     # Logging
     summary_writer = tf.summary.FileWriter(
-        logdir=path.join(args.output, 'log'), graph=tf.get_default_graph())
+        logdir=path.join(output, 'log'), graph=tf.get_default_graph())
     g_summary = tf.summary.merge_all()
 
     saver = tf.train.Saver(max_to_keep=10)
 
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.95)
-    with tf.device('/device:GPU:0'):
-        with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
-            # Checkpoint restore / variable initialising
-            save_path = path.join(args.output, 'model.ckpt')
-            latest_checkpoint = tf.train.latest_checkpoint(args.output)
-            if latest_checkpoint is None:
-                print("Initializing variables")
-                timestamp = time()
-                tf.get_variable_scope().set_initializer(tf.random_normal_initializer(mean=0.0, stddev=0.01))
-                tf.global_variables_initializer().run()
-                print("Done in %.2fs" % tdiff(timestamp))
-            else:
-                print("Restoring from checkpoint variables")
-                timestamp = time()
-                saver.restore(sess=sess, save_path=latest_checkpoint)
-                print("Done in %.2fs" % tdiff(timestamp))
-
-            print()
+    with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+        # Checkpoint restore / variable initialising
+        save_path = path.join(output, 'model.ckpt')
+        latest_checkpoint = tf.train.latest_checkpoint(output)
+        if latest_checkpoint is None:
+            print("Initializing variables")
             timestamp = time()
-            global_step_v = 0
-            avg_loss = 0.0
+            tf.get_variable_scope().set_initializer(tf.random_normal_initializer(mean=0.0, stddev=0.01))
+            tf.global_variables_initializer().run()
+            print("Done in %.2fs" % tdiff(timestamp))
+        else:
+            print("Restoring from checkpoint variables")
+            timestamp = time()
+            saver.restore(sess=sess, save_path=latest_checkpoint)
+            print("Done in %.2fs" % tdiff(timestamp))
 
-            eval_precisions = []
-            eval_recalls = []
-            eval_fscores = []
+        print()
+        timestamp = time()
+        global_step_v = 0
+        avg_loss = 0.0
 
-            # Training loop
-            try:
-                for epoch in range(args.max_epoch):
-                    for bucket_id in train_buckets:
-                        for batch_X, batch_X_lengths, batch_Y in feed_joint(train_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size):
-                            # Single training step
-                            summary_v, global_step_v, loss_v, _ = sess.run(
-                                fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
-                                feed_dict={nn.g_in: batch_X,
-                                           nn.g_labels: batch_Y,
-                                           nn.g_dprob: 0.6,
-                                           nn.g_lengths: batch_X_lengths})
-                            summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
-                            avg_loss += loss_v
+        eval_precisions = []
+        eval_recalls = []
+        eval_fscores = []
 
-                            # Reporting
-                            if global_step_v % args.report_period == 0:
-                                avg_loss /= args.report_period
-                                print("Iter %d, epoch %.0f, avg.loss %.4f, iter/s %.4fs" % (
-                                    global_step_v, epoch, avg_loss, tdiff(timestamp) / args.report_period
+        # Training loop
+        try:
+            for epoch in range(args.max_epoch):
+                for bucket_id in train_buckets:
+                    for batch_X, batch_X_lengths, batch_Y in feed_joint(train_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size):
+                        # Single training step
+                        summary_v, global_step_v, loss_v, _ = sess.run(
+                            fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
+                            feed_dict={nn.g_in: batch_X,
+                                       nn.g_labels: batch_Y,
+                                       nn.g_dprob: 0.6,
+                                       nn.g_lengths: batch_X_lengths})
+                        summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
+                        avg_loss += loss_v
+
+                        # Reporting
+                        if global_step_v % args.report_period == 0:
+                            avg_loss /= args.report_period
+                            print("Iter %d, epoch %.0f, avg.loss %.4f, iter/s %.4fs" % (
+                                global_step_v, epoch, avg_loss, tdiff(timestamp) / args.report_period
+                            ))
+                            timestamp = time()
+                            avg_loss = 0.0
+
+                        # Evaluation
+                        if global_step_v % (args.report_period*10) == 0:
+                            timestamp = time()
+                            for bucket_id in test_buckets:
+                                cur_p, cur_r, cur_f1, wd = do_eval(nn,
+                                                                   feed_joint(test_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size, enable_shuffle=False),
+                                                                   output)
+                                eval_precisions.append(cur_p)
+                                eval_recalls.append(cur_r)
+                                eval_fscores.append(cur_f1)
+                                print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
+                                    cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
                                 ))
-                                timestamp = time()
-                                avg_loss = 0.0
+                            timestamp = time()
 
-                            # Evaluation
-                            if global_step_v % (args.report_period*10) == 0:
-                                timestamp = time()
-                                for bucket_id in test_buckets:
-                                    cur_p, cur_r, cur_f1, wd = do_eval(nn, feed_joint(test_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size), args.output)
-                                    eval_precisions.append(cur_p)
-                                    eval_recalls.append(cur_r)
-                                    eval_fscores.append(cur_f1)
-                                    print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
-                                        cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
-                                    ))
-                                timestamp = time()
+                        # Checkpointing
+                        if global_step_v % (args.report_period*10) == 0:
+                            real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
+                            print("Saved the checkpoint to: %s" % real_save_path)
+                            print('precisions:', eval_precisions)
+                            print('recalls:', eval_recalls)
+                            print('fscores:', eval_fscores)
+        except Exception as e:
+            print(e)
 
-                            # Checkpointing
-                            if global_step_v % (args.report_period*10) == 0:
-                                real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
-                                print("Saved the checkpoint to: %s" % real_save_path)
-                                print('precisions:', eval_precisions)
-                                print('recalls:', eval_recalls)
-                                print('fscores:', eval_fscores)
-            except Exception as e:
-                print(e)
-
-            real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
-            for bucket_id in test_buckets:
-                timestamp = time()
-                cur_p, cur_r, cur_f1, wd = do_eval(nn, feed_joint(test_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size), args.output)
-                print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
-                    cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
-                ))
-            print("Saved the checkpoint to: %s" % real_save_path)
-            print('total precisions:', eval_precisions)
-            print('total recalls:', eval_recalls)
-            print('total fscores:', eval_fscores)
+        real_save_path = saver.save(sess=sess, save_path=save_path, global_step=global_step_v)
+        for bucket_id in test_buckets:
+            timestamp = time()
+            cur_p, cur_r, cur_f1, wd = do_eval(nn,
+                                               feed_joint(test_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size, enable_shuffle=False),
+                                               output)
+            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
+                cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
+            ))
+        print("Saved the checkpoint to: %s" % real_save_path)
+        print('total precisions:', eval_precisions)
+        print('total recalls:', eval_recalls)
+        print('total fscores:', eval_fscores)
 
 
 def do_eval(model, generator, output):
@@ -313,4 +307,24 @@ if __name__ == '__main__':
                         help='Enable buckets')
 
     args = parser.parse_args()
-    main(args)
+    print("Starting training with parameters:", vars(args))
+
+    ssm_string = load_ssm_string(args.data)
+    ssm_phon = load_ssm_phonetics(args.data)
+    ssm_lex_strut = load_ssm_lex_struct_watanabe(args.data)
+    ssms = {"all": [ssm_string, ssm_phon, ssm_lex_strut],
+            "ssm_string": [ssm_string],
+            "ssm_phon": [ssm_phon],
+            "ssm_lex_strut": [ssm_lex_strut]}
+
+    # allow indexed access to dataframes
+    for elem in ssms["all"]:
+        elem.set_index(['id'], inplace=True)
+
+    for key in ssms:
+        print("==============================")
+        print("Training %s" % key)
+        print("==============================")
+        if key not in ["ssm_phon"]:
+            continue
+        main(args, path.join(args.output, key), ssms[key])

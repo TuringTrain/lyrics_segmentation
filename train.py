@@ -1,5 +1,3 @@
-from cnn.dense import Dense
-from cnn.mnist_like import MnistLike
 from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_multiple_ssms, labels_from_label_array
 from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets, windowdiff
@@ -26,9 +24,15 @@ def add_to_buckets(buckets: dict(), bucket_id: int, tensor: np.ndarray, added_fe
     X_added.append(added_features)
     Y.append(labels)
 
-# Given column vector of feature for line i, produce matrix indicating features in lines i-1, i, i+1
-# note this is slightly bugged at first and last line
+
 def window_features(feat_vector: np.ndarray) -> np.ndarray:
+    """
+        Given column vector of feature for line i, produce matrix indicating features in lines i-1, i, i+1
+        note this is slightly bugged at first and last line
+
+    :param feat_vector:
+    :return:
+    """
     return np.concatenate(
                (
                np.roll(feat_vector, -1, axis = 0),
@@ -38,17 +42,13 @@ def window_features(feat_vector: np.ndarray) -> np.ndarray:
                axis = 1
     )
 
-def main(args):
-    print("Starting training with parameters:", vars(args))
 
+def main(args, output, multiple_ssms_data):
     # Load the data
     print("Loading data...")
     timestamp = time()
 
     # load different aligned SSMs
-    multiple_ssms_data = [load_ssm_string(args.data),
-                          #load_ssm_phonetics(args.data),
-                          ]
     channels = len(multiple_ssms_data)
     print("Found", channels, "SSM channels")
 
@@ -79,7 +79,7 @@ def main(args):
     max_ssm_size = 0
     counter = 0
     for ssm_obj in multiple_ssms_data[0].itertuples():
-        current_id = ssm_obj.id
+        current_id = ssm_obj.Index
         #skip ids not in training or dev
         if not current_id in train_test_borders_set:
             continue
@@ -96,11 +96,6 @@ def main(args):
     filtered = 0
     timestamp = time()
     max_ssm_size = min(max_ssm_size, args.max_ssm_size)
-
-    #allow indexed access to dataframes
-    for elem in multiple_ssms_data:
-        elem.set_index(['id'], inplace=True)
-
 
     for borders_obj in segment_borders.itertuples():
         counter += 1
@@ -159,7 +154,6 @@ def main(args):
             assert current_id in test_borders_set, 'id ' + current_id + ' is neither in train nor in test!'
             add_to_buckets(test_buckets, bucket_id, ssm_tensor, added_features, ssm_labels)
 
-    del multiple_ssms_data
     del added_features
     del segment_borders
     del train_borders
@@ -187,15 +181,16 @@ def main(args):
 
     # Logging
     summary_writer = tf.summary.FileWriter(
-        logdir=path.join(args.output, 'log'), graph=tf.get_default_graph())
+        logdir=path.join(output, 'log'), graph=tf.get_default_graph())
     g_summary = tf.summary.merge_all()
 
     saver = tf.train.Saver(max_to_keep=10)
 
-    with tf.Session() as sess:
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.95)
+    with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
         # Checkpoint restore / variable initialising
-        save_path = path.join(args.output, 'model.ckpt')
-        latest_checkpoint = tf.train.latest_checkpoint(args.output)
+        save_path = path.join(output, 'model.ckpt')
+        latest_checkpoint = tf.train.latest_checkpoint(output)
         if latest_checkpoint is None:
             print("Initializing variables")
             timestamp = time()
@@ -244,7 +239,7 @@ def main(args):
                     if global_step_v % (args.report_period*10) == 0:
                         timestamp = time()
                         for bucket_id in test_buckets:
-                            cur_p, cur_r, cur_f1, wd = do_eval(nn, feed(test_buckets[bucket_id], 1), args.output)
+                            cur_p, cur_r, cur_f1, wd = do_eval(nn, feed(test_buckets[bucket_id], 1, enable_shuffle=False), output)
                             eval_precisions.append(cur_p)
                             eval_recalls.append(cur_r)
                             eval_fscores.append(cur_f1)
@@ -265,7 +260,7 @@ def main(args):
         print("Saved the checkpoint to: %s" % real_save_path)
         for bucket_id in test_buckets:
             timestamp = time()
-            cur_p, cur_r, cur_f1, wd = do_eval(nn, feed(test_buckets[bucket_id], 1), args.output)
+            cur_p, cur_r, cur_f1, wd = do_eval(nn, feed(test_buckets[bucket_id], 1, enable_shuffle=False), output)
             print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
                 cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
             ))
@@ -333,4 +328,24 @@ if __name__ == '__main__':
                         help='Enable buckets')
 
     args = parser.parse_args()
-    main(args)
+    print("Starting training with parameters:", vars(args))
+
+    ssm_string = load_ssm_string(args.data)
+    ssm_phon = load_ssm_phonetics(args.data)
+    ssm_lex_strut = load_ssm_lex_struct_watanabe(args.data)
+    ssms = {"all": [ssm_string, ssm_phon, ssm_lex_strut],
+            "ssm_string": [ssm_string],
+            "ssm_phon": [ssm_phon],
+            "ssm_lex_strut": [ssm_lex_strut]}
+
+    # allow indexed access to dataframes
+    for elem in ssms["all"]:
+        elem.set_index(['id'], inplace=True)
+
+    for key in ssms:
+        print("==============================")
+        print("Training %s" % key)
+        print("==============================")
+        if key not in ["ssm_phon"]:
+            continue
+        main(args, path.join(args.output, key), ssms[key])
