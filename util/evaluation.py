@@ -2,9 +2,16 @@ import sys
 import logging
 import warnings
 import numpy as np
+from sklearn.metrics import confusion_matrix
+from util.helpers import precision, f1, recall
 
 _module = sys.modules['__main__'].__file__
 _logger = logging.getLogger(_module)
+
+
+def pr_class_one(expected, predicted):
+    _, fp, fn, tp = confusion_matrix(expected, predicted).ravel()
+    return np.array([precision(tp=tp, fp=fp), recall(tp=tp, fn=fn), f1(tp=tp, fp=fp, fn=fn)])
 
 
 def pr_measures(expected, predicted):

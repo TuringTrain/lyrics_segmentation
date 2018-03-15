@@ -346,6 +346,6 @@ if __name__ == '__main__':
         print("==============================")
         print("Training %s" % key)
         print("==============================")
-        if key not in ["ssm_phon"]:
+        if key not in ["all"]:
             continue
         main(args, path.join(args.output, key), ssms[key])
