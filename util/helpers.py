@@ -30,7 +30,25 @@ def compact_buckets(buckets: dict()) -> dict():
     return buckets
 
 
-def feed_joint(data: (np.ndarray, np.ndarray), ssm_size: int, batch_size: int, enable_shuffle=True) -> (np.ndarray, np.ndarray, np.ndarray):
+def window_features(feat_vector: np.ndarray) -> np.ndarray:
+    """
+        Given column vector of feature for line i, produce matrix indicating features in lines i-1, i, i+1
+        note this is slightly bugged at first and last line
+
+    :param feat_vector:
+    :return:
+    """
+    return np.concatenate(
+       (
+           np.roll(feat_vector, -1, axis=0),
+           feat_vector,
+           np.roll(feat_vector, +1, axis=0)
+       ),
+       axis=1
+    )
+
+
+def feed_joint(data: (np.ndarray, np.ndarray, np.ndarray), ssm_size: int, batch_size: int, enable_shuffle=True) -> (np.ndarray, np.ndarray, np.ndarray, np.ndarray):
     """
     Produce random batches of data from the dataset
 
@@ -38,18 +56,23 @@ def feed_joint(data: (np.ndarray, np.ndarray), ssm_size: int, batch_size: int, e
     :param batch_size: size of the batches
     :return: batch
     """
-    X, _, Y = data
+    X, X_added, Y = data
     if enable_shuffle:
-        X, Y = shuffle(X, Y)
+        X, X_added, Y = shuffle(X, X_added, Y)
     size = len(Y)
 
-    def put(X_batch, X_lengths, Y_batch, i, X, Y):
+    def put(X_batch, X_added_batch, X_lengths, Y_batch, i, X, X_added, Y):
         item = X[i]
         y = Y[i]
+        added = X_added[i]
         pad_size = ssm_size - item.shape[0]
 
         X_lengths.append(item.shape[0])
         Y_batch.append(np.concatenate((y, np.zeros([pad_size]))))
+        X_added_batch.append(np.concatenate((
+            added,
+            np.zeros([pad_size, added.shape[1]])  # Padding from right
+        ), axis=0))
         X_batch.append(np.concatenate((
             item,
             np.zeros([pad_size, item.shape[1], item.shape[2], item.shape[3]])  # Padding from right
@@ -58,12 +81,13 @@ def feed_joint(data: (np.ndarray, np.ndarray), ssm_size: int, batch_size: int, e
     pointer = 0
     while pointer < size:
         X_batch = []
+        X_added_batch = []
         X_lengths = []
         Y_batch = []
         for i in range(pointer, min(pointer+batch_size, size)):
-            put(X_batch, X_lengths, Y_batch, i, X, Y)
+            put(X_batch, X_added_batch, X_lengths, Y_batch, i, X, X_added, Y)
 
-        yield np.stack(X_batch), np.stack(X_lengths), np.stack(Y_batch)
+        yield np.stack(X_batch), np.stack(X_added_batch), np.stack(X_lengths), np.stack(Y_batch)
         pointer += batch_size
 
 

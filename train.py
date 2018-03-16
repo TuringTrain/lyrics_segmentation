@@ -1,8 +1,9 @@
 from cnn.no_padding_1conv import NoPadding1Conv
 from extract_features import tensor_from_multiple_ssms, labels_from_label_array
-from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets, windowdiff
+from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets, windowdiff, window_features
 
-from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature, load_ssm_lex_struct_watanabe
+from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature, load_ssm_lex_struct_watanabe, \
+    load_border_terms_watanabe
 from util.load_data import load_segment_borders, load_segment_borders_watanabe, load_segment_borders_for_genre
 
 import argparse
@@ -25,24 +26,6 @@ def add_to_buckets(buckets: dict(), bucket_id: int, tensor: np.ndarray, added_fe
     Y.append(labels)
 
 
-def window_features(feat_vector: np.ndarray) -> np.ndarray:
-    """
-        Given column vector of feature for line i, produce matrix indicating features in lines i-1, i, i+1
-        note this is slightly bugged at first and last line
-
-    :param feat_vector:
-    :return:
-    """
-    return np.concatenate(
-               (
-               np.roll(feat_vector, -1, axis = 0),
-               feat_vector,
-               np.roll(feat_vector, +1, axis = 0)
-               ),
-               axis = 1
-    )
-
-
 def main(args, output, multiple_ssms_data):
     # Load the data
     print("Loading data...")
@@ -59,8 +42,10 @@ def main(args, output, multiple_ssms_data):
     # token_count_feat.set_index(['id'], inplace=True)
     # syllable_count_feat = load_linewise_feature(args.data, 'syllable_count')
     # syllable_count_feat.set_index(['id'], inplace=True)
-    char_count_feat = load_linewise_feature(args.data, 'char_count')
-    char_count_feat.set_index(['id'], inplace=True)
+    # char_count_feat = load_linewise_feature(args.data, 'char_count')
+    # char_count_feat.set_index(['id'], inplace=True)
+    border_ngram_feats = load_border_terms_watanabe(args.data)
+    border_ngram_feats.set_index(['id'], inplace=True)
 
     if not args.genre:
         train_borders, test_borders = load_segment_borders_watanabe(args.data)
@@ -100,10 +85,6 @@ def main(args, output, multiple_ssms_data):
     for borders_obj in segment_borders.itertuples():
         counter += 1
 
-        # temp. speedup for debugging
-        #if counter % 100 != 0:
-        #    continue
-
         current_id = borders_obj.id
 
         #skip ids not in training or test
@@ -135,14 +116,16 @@ def main(args, output, multiple_ssms_data):
         # one tensor for one song
         ssm_tensor = tensor_from_multiple_ssms(ssm_elems, 2**bucket_id, args.window_size)
         # concatenate all added features at axis=1 here
-        added_features = np.concatenate(
-                             (
+        #added_features = np.concatenate(
+        #                     (
                              #window_features(token_count_feat.loc[current_id].feat_val),
                              #window_features(syllable_count_feat.loc[current_id].feat_val),
-                             window_features(char_count_feat.loc[current_id].feat_val),
-                             ),
-                             axis = 1
-                        )
+        #                     window_features(char_count_feat.loc[current_id].feat_val),
+        #                     ),
+        #                     axis=1
+        #                )
+        #added_feats_count = added_features.shape[1]
+        added_features = border_ngram_feats.loc[current_id].feat_val
         added_feats_count = added_features.shape[1]
 
         ssm_labels = labels_from_label_array(borders_obj.borders, ssm_size)
@@ -243,7 +226,7 @@ def main(args, output, multiple_ssms_data):
                             eval_precisions.append(cur_p)
                             eval_recalls.append(cur_r)
                             eval_fscores.append(cur_f1)
-                            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
+                            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.4f, done in %.2fs" % (
                                 cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
                             ))
                             print('precisions:', eval_precisions)
@@ -261,7 +244,7 @@ def main(args, output, multiple_ssms_data):
         for bucket_id in test_buckets:
             timestamp = time()
             cur_p, cur_r, cur_f1, wd = do_eval(nn, feed(test_buckets[bucket_id], 1, enable_shuffle=False), output)
-            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
+            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.4f, done in %.2fs" % (
                 cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
             ))
         print('total precisions:', eval_precisions)

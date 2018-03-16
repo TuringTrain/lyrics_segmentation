@@ -45,7 +45,9 @@ if __name__ == '__main__':
     # Figuring out models
     models = {}
     evaluations = {}
-    best = {}
+    best_model = None
+    best_feature_set = None
+    best_score = 0
     for model in listdir(args.input):
         if model.startswith("."):
             continue
@@ -53,8 +55,6 @@ if __name__ == '__main__':
         if model not in models:
             models[model] = {}
             evaluations[model] = {}
-        best_feature_set = None
-        best_score = 0
         for feature_set in listdir(model_dir):
             if feature_set.startswith("."):
                 continue
@@ -66,6 +66,7 @@ if __name__ == '__main__':
             if evaluation[2] > best_score:
                 best_score = evaluation[2]
                 best_feature_set = feature_set
+                best_model = model
 
             if feature_set not in evaluations[model] or evaluations[model][feature_set][2] < evaluation[2]:
                 evaluations[model][feature_set] = evaluation
@@ -82,11 +83,10 @@ if __name__ == '__main__':
             print("      %30s    r: %.4f" % ("", evaluation[1]))
             print("      %30s   f1: %.4f" % ("", evaluation[2]))
             print("      %30s   wd: %.4f" % ("", wd))
-        best[model] = best_feature_set
 
     for model in models:
-        best_predictions = models[model][best[model]]
-        best_eval = evaluations[model][best[model]]
+        best_predictions = models[best_model][best_feature_set]
+        best_eval = evaluations[best_model][best_feature_set]
         for feature_set in models[model]:
             cur_predictions = models[model][feature_set]
             cur_eval = evaluations[model][feature_set]
@@ -101,5 +101,5 @@ if __name__ == '__main__':
                 outcome = "[YES]"
             print("Significance %s p: %.5f, r: %.5f, f1: %.5f" % (outcome, significance[0], significance[1], significance[2]))
             print("     %30s p: %.4f, r: %.4f, f1: %.4f" % (model+"@"+feature_set, cur_eval[0], cur_eval[1], cur_eval[2]))
-            print("  vs %30s p: %.4f, r: %.4f, f1: %.4f" % (model+"@"+best[model], best_eval[0], best_eval[1], best_eval[2]))
+            print("  vs %30s p: %.4f, r: %.4f, f1: %.4f" % (best_model+"@"+best_feature_set, best_eval[0], best_eval[1], best_eval[2]))
 

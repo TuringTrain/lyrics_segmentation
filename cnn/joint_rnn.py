@@ -19,6 +19,7 @@ class JointRNN(NoPadding1Conv):
             self.g_lengths = tf.placeholder(tf.int32, shape=[None], name="lengths")
             self.g_labels = tf.placeholder(tf.int32, shape=[None, ssm_size], name="labels")
             self.g_dprob = tf.placeholder(tf.float32, name="dropout_prob")
+            self.g_added_features = tf.placeholder(tf.float32, shape=[None, ssm_size, added_features_size], name="additional_features")
 
         # Reshape to use within a convolutional neural net.
         #   contrary to mnist example, it just adds the last dimension whichs is the amount of channels in the image,
@@ -66,7 +67,10 @@ class JointRNN(NoPadding1Conv):
         # We have to either fix the ssm_size or do an average here
         fc_input_size = features_conv2
         fc_size = 512
-        fc_input = tf.reshape(h_pool2_drop, [-1, ssm_size, features_conv2])
+        fc_input = tf.concat(
+            (tf.reshape(h_pool2_drop, [-1, ssm_size, features_conv2]), self.g_added_features),
+            axis=2
+        )
         # for fc_id in range(3):
         #    with tf.name_scope('fc-%d' % fc_id):
         #        W_fc = self.weight_variable([fc_input_size, fc_size])

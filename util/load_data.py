@@ -9,6 +9,18 @@ from os import path
 #   for the 107k ids in segment_borders, as they are all english with 5+ segments
 
 
+def load_border_terms_watanabe(data_path: str) -> pd.DataFrame:
+    base_name = 'ngrams_watanabe_'
+    table_name = 'ngrams'
+    with pd.HDFStore(path.join(data_path, base_name + str(1) + '.hdf')) as store:
+        sssm = store[table_name]
+    for i in [x+2 for x in range(9)]:
+        with pd.HDFStore(path.join(data_path, base_name + str(i) + '.hdf')) as store:
+            print('appending', data_path, base_name + str(i) + '.hdf')
+            sssm = sssm.append(store[table_name])
+    return sssm
+
+
 def load_segment_borders(data_path: str) -> pd.DataFrame:
     with pd.HDFStore(path.join(data_path, 'borders_pub1.hdf')) as store:
         borders = store['mdb_127_en_seg5p']

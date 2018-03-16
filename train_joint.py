@@ -1,8 +1,9 @@
 from cnn.joint_rnn import JointRNN
 from extract_features import tensor_from_multiple_ssms, labels_from_label_array
-from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets, feed_joint, windowdiff
+from util.helpers import precision, recall, f1, k, tdiff, feed, compact_buckets, feed_joint, windowdiff, window_features
 
-from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature, load_ssm_lex_struct_watanabe
+from util.load_data import load_ssm_string, load_ssm_phonetics, load_linewise_feature, load_ssm_lex_struct_watanabe, \
+    load_border_terms_watanabe
 from util.load_data import load_segment_borders, load_segment_borders_watanabe, load_segment_borders_for_genre
 
 import argparse
@@ -36,7 +37,16 @@ def main(args, output, multiple_ssms_data):
     print("Found", channels, "SSM channels")
 
     segment_borders = load_segment_borders(args.data)
-    token_count_feat = load_linewise_feature(args.data, 'token_count')
+
+    # ADDITIONAL FEATURES FOR AFTER CONVOLUTION
+    # token_count_feat = load_linewise_feature(args.data, 'token_count')
+    # token_count_feat.set_index(['id'], inplace=True)
+    # syllable_count_feat = load_linewise_feature(args.data, 'syllable_count')
+    # syllable_count_feat.set_index(['id'], inplace=True)
+    # char_count_feat = load_linewise_feature(args.data, 'char_count')
+    # char_count_feat.set_index(['id'], inplace=True)
+    border_ngram_feats = load_border_terms_watanabe(args.data)
+    border_ngram_feats.set_index(['id'], inplace=True)
 
     if not args.genre:
         train_borders, test_borders = load_segment_borders_watanabe(args.data)
@@ -73,14 +83,8 @@ def main(args, output, multiple_ssms_data):
     timestamp = time()
     max_ssm_size = min(max_ssm_size, args.max_ssm_size)
 
-    token_count_feat.set_index(['id'], inplace=True)
-
     for borders_obj in segment_borders.itertuples():
         counter += 1
-
-        # temp. speedup for debugging
-        #if counter % 100 != 0:
-        #    continue
 
         current_id = borders_obj.id
 
@@ -113,7 +117,16 @@ def main(args, output, multiple_ssms_data):
         # one tensor for one song
         ssm_tensor = tensor_from_multiple_ssms(ssm_elems, 2**bucket_id, args.window_size)
         # concatenate all added features at axis=1 here
-        added_features = token_count_feat.loc[current_id].feat_val
+        #added_features = np.concatenate(
+        #                     (
+                             #window_features(token_count_feat.loc[current_id].feat_val),
+                             #window_features(syllable_count_feat.loc[current_id].feat_val),
+        #                     window_features(char_count_feat.loc[current_id].feat_val),
+        #                     ),
+        #                     axis = 1
+        #                )
+        #added_feats_count = added_features.shape[1]
+        added_features = border_ngram_feats.loc[current_id].feat_val
         added_feats_count = added_features.shape[1]
 
         ssm_labels = labels_from_label_array(borders_obj.borders, ssm_size)
@@ -185,14 +198,15 @@ def main(args, output, multiple_ssms_data):
         try:
             for epoch in range(args.max_epoch):
                 for bucket_id in train_buckets:
-                    for batch_X, batch_X_lengths, batch_Y in feed_joint(train_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size):
+                    for batch_X, batch_added_X, batch_X_lengths, batch_Y in feed_joint(train_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size):
                         # Single training step
                         summary_v, global_step_v, loss_v, _ = sess.run(
                             fetches=[g_summary, g_global_step, nn.g_loss, g_train_op],
                             feed_dict={nn.g_in: batch_X,
                                        nn.g_labels: batch_Y,
                                        nn.g_dprob: 0.6,
-                                       nn.g_lengths: batch_X_lengths})
+                                       nn.g_lengths: batch_X_lengths,
+                                       nn.g_added_features: batch_added_X})
                         summary_writer.add_summary(summary=summary_v, global_step=global_step_v)
                         avg_loss += loss_v
 
@@ -215,7 +229,7 @@ def main(args, output, multiple_ssms_data):
                                 eval_precisions.append(cur_p)
                                 eval_recalls.append(cur_r)
                                 eval_fscores.append(cur_f1)
-                                print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
+                                print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.4f, done in %.2fs" % (
                                     cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
                                 ))
                             timestamp = time()
@@ -236,7 +250,7 @@ def main(args, output, multiple_ssms_data):
             cur_p, cur_r, cur_f1, wd = do_eval(nn,
                                                feed_joint(test_buckets[bucket_id], 2 ** next(train_buckets.keys().__iter__()), args.batch_size, enable_shuffle=False),
                                                output)
-            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.2fs" % (
+            print("  P: %.2f%%, R: %.2f%%, F1: %.2f%%, WD: %.2f, done in %.4fs" % (
                 cur_p, cur_r, cur_f1, wd, tdiff(timestamp)
             ))
         print("Saved the checkpoint to: %s" % real_save_path)
@@ -252,12 +266,13 @@ def do_eval(model, generator, output):
     wd = 0
     wd_count = 0
     with open(path.join(output, 'eval.txt'), 'w') as writer:
-        for test_X, test_X_lengths, true_Y in generator:
+        for test_X, test_added_X, test_X_lengths, true_Y in generator:
             # batch_size x max_len x 2
             pred_Y = model.g_out.eval(feed_dict={
                 model.g_in: test_X,
                 model.g_dprob: 1.0,
-                model.g_lengths: test_X_lengths
+                model.g_lengths: test_X_lengths,
+                model.g_added_features: test_added_X
             })
             for i in range(pred_Y.shape[0]):
                 writer.write("==========\n")
