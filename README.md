@@ -1,8 +1,8 @@
-## Lyrics Segmentation: Textual Macrostructure Detection using Convolutions @ COLING2018
+# Lyrics Segmentation using Convolutions
 
-This repository contains all the code needed to run and reproduce results reported in our COLING2018 paper
+This repository contains all the code needed to run and reproduce results reported in our COLING2018 paper.
 
-### Abstract
+## Abstract
 
 Lyrics contain repeated patterns that are correlated with the repetitions
  found in the music they accompany. Repetitions in song texts
@@ -10,3 +10,6 @@ Lyrics contain repeated patterns that are correlated with the repetitions
  – a fundamental prerequisite of automatically detecting the building blocks (e.g. chorus, verse) of a song text.
  In this article we improve on the state-of-the-art in lyrics segmentation by applying a convolutional neural 
  network to the task, and experiment with novel features as a step towards deeper macrostructure detection of lyrics.
+
+### Citation
+```Fell, Michael, et al. "Lyrics Segmentation: Textual Macrostructure Detection using Convolutions." Proceedings of the 27th International Conference on Computational Linguistics. 2018.```
