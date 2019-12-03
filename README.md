@@ -12,4 +12,12 @@ Lyrics contain repeated patterns that are correlated with the repetitions
  network to the task, and experiment with novel features as a step towards deeper macrostructure detection of lyrics.
 
 ### Citation
-```Michael Fell, Yaroslav Nechaev, Elena Cabrio, Fabien Gandon. Lyrics Segmentation: Textual Macrostructure Detection using Convolutions. In Proceedings of the Conference on Computational Linguistics (COLING '18), Santa Fe, New Mexico, United States. pp.2044-2054.```
+```
+@inproceedings{fell:segmentation,
+  TITLE = {Lyrics Segmentation: Textual Macrostructure Detection using Convolutions},
+  AUTHOR = {Fell, Michael and Nechaev, Yaroslav and Cabrio, Elena and Gandon, Fabien},
+  BOOKTITLE = {Conference on Computational Linguistics (COLING)},
+  ADDRESS = {Santa Fe, New Mexico, United States},
+  YEAR = {2018},
+}
+```
